@@ -1,0 +1,323 @@
+# Audit Status Configuration
+# This file configures the automated server auditing system
+
+# Auditor metadata and identification
+auditor:
+  name: "Audit Status"
+  version: "1.0.0"
+  contact:
+    email: "support@auditstatus.com"
+    github: "auditstatus"
+    website: "https://auditstatus.com"
+
+# Repository configuration for source code verification
+repository:
+  name: "example/api"
+  branch: "main"
+  depth: 1  # Git clone depth for efficiency
+  timeout: 300  # Seconds to wait for git operations
+  base_url: "https://github.com"
+
+# Attestium integration settings
+attestium:
+  autoDetectTpm: true           # Automatically detect and use TPM if available
+  enableTpm: false              # Force enable/disable TPM (overrides autoDetect)
+  fallbackMode: "software"      # Fallback when TPM unavailable: "software" | "disabled"
+  productionMode: false         # Enable production security features
+  
+  # TPM 2.0 specific settings (when available)
+  tpm:
+    keyContext: "/secure/auditstatus.ctx"
+    sealedDataPath: "/secure/auditstatus-sealed.dat"
+    pcrList: [0, 1, 2, 3, 7, 8]  # Platform Configuration Registers to use
+    
+  # External validation network
+  externalValidation:
+    enabled: false
+    requiredConfirmations: 1
+    nodes:
+      - "https://validator1.attestium.com"
+      - "https://validator2.attestium.com"
+
+# Server configurations - Add/modify servers to audit here
+servers:
+  # Production API Server
+  - name: "Production API"
+    url: "https://api.example.com"
+    type: "api"
+    environment: "production"
+    priority: "critical"  # critical | high | medium | low
+    repository: "https://github.com/example/api"
+    branch: "main"
+    endpoints:
+      status: "/audit/status"
+      checksums: "/audit/checksums"
+      modules: "/audit/modules"
+      report: "/audit/report"
+    timeout: 30  # Request timeout in seconds
+    retry_attempts: 3
+    retry_delay: 5  # Seconds between retries
+    expected_status_codes: [200]
+    headers:
+      User-Agent: "Audit-Status/1.0.0"
+      Accept: "application/json"
+    
+  # Staging Environment
+  - name: "Staging API"
+    url: "https://staging-api.example.com"
+    type: "api"
+    environment: "staging"
+    priority: "high"
+    repository: "https://github.com/example/api"
+    branch: "develop"
+    endpoints:
+      status: "/audit/status"
+      checksums: "/audit/checksums"
+      modules: "/audit/modules"
+      report: "/audit/report"
+    timeout: 30
+    retry_attempts: 3
+    retry_delay: 5
+    expected_status_codes: [200]
+    headers:
+      User-Agent: "Audit-Status/1.0.0"
+      Accept: "application/json"
+    enabled: false  # Set to true to include in audits
+
+  # Web Application Server
+  - name: "Web Application"
+    url: "https://app.example.com"
+    type: "web"
+    environment: "production"
+    priority: "critical"
+    repository: "https://github.com/example/webapp"
+    branch: "main"
+    endpoints:
+      status: "/verify/status"
+      checksums: "/verify/checksums"
+      modules: "/verify/modules"
+      report: "/verify/report"
+    timeout: 30
+    retry_attempts: 3
+    retry_delay: 5
+    expected_status_codes: [200]
+    headers:
+      User-Agent: "Audit-Status/1.0.0"
+
+# File verification configuration
+verification:
+  # File patterns to include in verification
+  include_patterns:
+    - "**/*.js"
+    - "**/*.json"
+    - "**/*.html"
+    - "**/*.css"
+    - "**/*.md"
+    - "package.json"
+    - "package-lock.json"
+    - "pnpm-lock.yaml"
+    
+  # File patterns to exclude from verification
+  exclude_patterns:
+    - "**/*.key"
+    - "**/*.pem"
+    - "**/.env*"
+    - "**/.git/**"
+    - "**/node_modules/**"
+    - "**/coverage/**"
+    - "**/logs/**"
+    - "**/*.log"
+    - "**/tmp/**"
+    - "**/temp/**"
+    
+  # Whether to inherit patterns from .gitignore
+  inherit_gitignore: true
+  
+  # Verification scope
+  verify_dependencies: true      # Include node_modules verification
+  verify_static_assets: true     # Include CSS, images, fonts, etc.
+  verify_source_code: true       # Include application source code
+  verify_config_files: true      # Include configuration files
+  verify_documentation: true     # Include README, docs, etc.
+  
+  # Checksum algorithm (sha256, sha512, md5)
+  checksum_algorithm: "sha256"
+  
+  # Maximum file size to verify (in MB)
+  max_file_size: 100
+  
+  # Maximum number of files to verify per server
+  max_files_per_server: 50000
+
+# Alert and notification configuration
+alerts:
+  # Severity levels that trigger alerts
+  severity_levels:
+    - "critical"
+    - "high"
+    - "medium"
+    # - "low"  # Uncomment to include low severity alerts
+    
+  # GitHub Issues integration
+  github_issues:
+    enabled: true
+    labels:
+      - "security"
+      - "audit"
+      - "automated"
+      - "verification"
+    assignees: []
+    milestone: null  # Set milestone number if desired
+    
+  # Slack/Discord webhook notifications (optional)
+  webhooks:
+    enabled: false
+    slack_webhook_url: ""  # Set your Slack webhook URL
+    discord_webhook_url: ""  # Set your Discord webhook URL
+    
+  # Email notifications (optional)
+  email:
+    enabled: false
+    smtp_host: ""
+    smtp_port: 587
+    smtp_user: ""
+    smtp_pass: ""
+    from_email: "auditor@auditstatus.com"
+    to_emails:
+      - "admin@example.com"
+
+# Performance and reliability settings
+performance:
+  # Request timeout in seconds
+  request_timeout: 30
+  
+  # Maximum concurrent server audits
+  max_concurrent_audits: 5
+  
+  # Delay between server audits (milliseconds)
+  audit_delay: 1000
+  
+  # Rate limiting
+  rate_limit:
+    requests_per_minute: 60
+    burst_limit: 10
+    
+  # Retry configuration
+  retry:
+    max_attempts: 3
+    base_delay: 5000  # milliseconds
+    max_delay: 30000  # milliseconds
+    exponential_backoff: true
+
+# Reporting configuration
+reporting:
+  # Output formats
+  formats:
+    - "json"
+    - "markdown"
+    - "html"
+    
+  # Report storage
+  storage:
+    local_path: "./audit-reports"
+    github_pages: true
+    retention_days: 30
+    
+  # Report content
+  include_checksums: true
+  include_module_details: true
+  include_discrepancy_details: true
+  include_recommendations: true
+  include_historical_comparison: true
+  
+  # Public dashboard configuration
+  dashboard:
+    enabled: true
+    title: "Server Verification Status"
+    description: "Real-time verification of server integrity powered by Audit Status"
+    update_frequency: "*/15 * * * *"  # Every 15 minutes
+    show_historical_data: true
+    max_history_entries: 100
+
+# Development and debugging options
+development:
+  # Enable verbose logging
+  verbose: false
+  
+  # Dry run mode (don't create issues or send alerts)
+  dry_run: false
+  
+  # Debug mode (additional logging and validation)
+  debug: false
+  
+  # Local testing configuration
+  local_testing:
+    enabled: false
+    mock_servers: false
+    test_data_path: "./test-data"
+    
+  # Logging configuration
+  logging:
+    level: "info"  # error | warn | info | debug
+    format: "json"  # json | text
+    file_path: "./logs/auditstatus.log"
+    max_file_size: "10MB"
+    max_files: 5
+
+# Security configuration
+security:
+  # API key for authenticated endpoints (if required)
+  api_key: ""  # Set if servers require authentication
+  
+  # Certificate validation
+  verify_ssl: true
+  allow_self_signed: false
+  
+  # Request signing (for tamper-proof verification)
+  request_signing:
+    enabled: true
+    algorithm: "sha256"
+    
+  # Nonce configuration for tamper-proof verification
+  nonce:
+    length: 32  # bytes
+    algorithm: "random"  # random | timestamp | counter
+    
+# GitHub Actions specific configuration
+github_actions:
+  # Workflow schedule (cron format)
+  schedule: "*/15 * * * *"  # Every 15 minutes
+  
+  # Workflow triggers
+  triggers:
+    - "schedule"
+    - "workflow_dispatch"
+    - "push"  # Optional: trigger on push to main branch
+    
+  # Environment variables
+  environment_variables:
+    NODE_ENV: "production"
+    AUDIT_MODE: "automated"
+    
+  # Artifact retention
+  artifact_retention_days: 30
+  
+  # Job timeout
+  job_timeout_minutes: 30
+
+# Custom extensions and plugins
+extensions:
+  # Custom verification scripts
+  custom_verifiers: []
+  
+  # Additional endpoints to check
+  custom_endpoints: []
+  
+  # Custom alert handlers
+  custom_alert_handlers: []
+  
+  # Plugin configuration
+  plugins:
+    enabled: []
+    config: {}
+
