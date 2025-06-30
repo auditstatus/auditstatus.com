@@ -1,0 +1,91 @@
+# PM2 Ecosystem Configuration Example
+# This example shows how to configure AuditStatus to verify PM2-managed applications
+
+servers:
+  # PM2 Ecosystem Verification
+  - name: production-web-cluster
+    pm2:
+      ecosystem: /path/to/ecosystem.config.js
+      environment: production
+    
+  # PM2 with specific ecosystem file and environment
+  - name: staging-api-servers
+    pm2:
+      ecosystem: ./config/staging-ecosystem.json
+      environment: staging
+
+  # PM2 with development environment (uses default env)
+  - name: development-services
+    pm2:
+      ecosystem: /home/deploy/ecosystem.json
+      # environment is optional, defaults to base 'env' configuration
+
+# Example ecosystem.config.js file structure:
+# module.exports = {
+#   apps: [
+#     {
+#       name: 'web-app',
+#       script: 'app.js',
+#       instances: 4,
+#       exec_mode: 'cluster',
+#       env: {
+#         NODE_ENV: 'development',
+#         PORT: 3000,
+#         DATABASE_URL: 'postgres://localhost/myapp_dev'
+#       },
+#       env_production: {
+#         NODE_ENV: 'production',
+#         PORT: 80,
+#         DATABASE_URL: 'postgres://prod-db/myapp'
+#       },
+#       env_staging: {
+#         NODE_ENV: 'staging',
+#         PORT: 8080,
+#         DATABASE_URL: 'postgres://staging-db/myapp'
+#       }
+#     },
+#     {
+#       name: 'worker',
+#       script: 'worker.js',
+#       instances: 2,
+#       env: {
+#         NODE_ENV: 'development',
+#         WORKER_THREADS: 2
+#       },
+#       env_production: {
+#         NODE_ENV: 'production',
+#         WORKER_THREADS: 8
+#       }
+#     }
+#   ],
+#   deploy: {
+#     production: {
+#       user: 'deploy',
+#       host: ['web1.example.com', 'web2.example.com'],
+#       ref: 'origin/main',
+#       repo: 'git@github.com:mycompany/myapp.git',
+#       path: '/var/www/production',
+#       port: 22,
+#       key: '~/.ssh/deploy_key',
+#       'post-deploy': 'npm install && pm2 reload ecosystem.config.js --env production'
+#     },
+#     staging: {
+#       user: 'deploy',
+#       host: 'staging.example.com',
+#       ref: 'origin/develop',
+#       repo: 'git@github.com:mycompany/myapp.git',
+#       path: '/var/www/staging',
+#       'post-deploy': 'npm install && pm2 reload ecosystem.config.js --env staging'
+#     }
+#   }
+# };
+
+# What AuditStatus verifies with PM2:
+# 1. All apps defined in ecosystem are running
+# 2. Correct number of instances for each app
+# 3. Apps are running with correct environment variables
+# 4. Apps are bound to expected ports
+# 5. Apps are running from correct working directories
+# 6. No unexpected PM2 processes are running
+# 7. Process execution modes match configuration (fork vs cluster)
+
