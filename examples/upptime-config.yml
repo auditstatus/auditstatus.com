@@ -1,0 +1,34 @@
+# Upptime Configuration with Audit Status
+#
+# Add this to your .upptimerc.yml to include audit status checks
+# alongside standard uptime monitoring.
+#
+# Upptime (https://github.com/upptime/upptime) monitors HTTP endpoints.
+# To integrate audit status, expose the server-check results as an
+# HTTP endpoint or use the badge JSON endpoint.
+#
+# Option 1: Monitor the audit badge endpoint
+# Option 2: Monitor a dedicated /health/audit endpoint
+# Option 3: Use a GitHub Action to SSH and run the check
+
+# Standard Upptime sites config with audit status endpoint
+sites:
+  - name: Production API
+    url: https://api.example.com
+    expectedStatusCodes:
+      - 200
+
+  - name: Production Audit Status
+    url: https://api.example.com/health/audit
+    expectedStatusCodes:
+      - 200
+    # The /health/audit endpoint should return 200 when audit passes,
+    # 503 when audit fails. See examples/health-endpoint.js for setup.
+
+  - name: Audit Badge Endpoint
+    url: https://api.example.com/audit-badge.json
+    expectedStatusCodes:
+      - 200
+
+# Upptime will create issues and send notifications when
+# the audit status endpoint returns non-200 responses.

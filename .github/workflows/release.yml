@@ -1,0 +1,130 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build-binaries:
+    name: Build ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x64
+            os: ubuntu-latest
+            platform: linux
+            arch: x64
+          - name: darwin-x64
+            os: macos-13
+            platform: darwin
+            arch: x64
+          - name: darwin-arm64
+            os: macos-14
+            platform: darwin
+            arch: arm64
+          - name: win-x64
+            os: windows-latest
+            platform: win
+            arch: x64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install pnpm
+        run: npm install -g pnpm
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Bundle CLI with esbuild
+        run: node scripts/build-sea.mjs
+
+      - name: Generate SEA blob
+        run: node --experimental-sea-config sea-config.json
+
+      # Linux build
+      - name: Build binary (Linux)
+        if: matrix.platform == 'linux'
+        run: |
+          BINARY_NAME="auditstatus-linux-x64"
+          cp "$(which node)" "$BINARY_NAME"
+          npx postject "$BINARY_NAME" NODE_SEA_BLOB sea-prep.blob \
+            --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2
+          chmod +x "$BINARY_NAME"
+          ./"$BINARY_NAME" version
+
+      # macOS build
+      - name: Build binary (macOS)
+        if: matrix.platform == 'darwin'
+        run: |
+          BINARY_NAME="auditstatus-darwin-${{ matrix.arch }}"
+          cp "$(which node)" "$BINARY_NAME"
+          codesign --remove-signature "$BINARY_NAME"
+          npx postject "$BINARY_NAME" NODE_SEA_BLOB sea-prep.blob \
+            --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2 \
+            --macho-segment-name NODE_SEA
+          codesign --sign - "$BINARY_NAME"
+          chmod +x "$BINARY_NAME"
+          ./"$BINARY_NAME" version
+
+      # Windows build
+      - name: Build binary (Windows)
+        if: matrix.platform == 'win'
+        shell: pwsh
+        run: |
+          $nodePath = (Get-Command node).Source
+          Copy-Item $nodePath "auditstatus-win-x64.exe"
+          npx postject "auditstatus-win-x64.exe" NODE_SEA_BLOB sea-prep.blob `
+            --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2
+          .\auditstatus-win-x64.exe version
+
+      # Verify binary
+      - name: Verify binary (Unix)
+        if: matrix.platform != 'win'
+        run: |
+          BINARY_NAME="auditstatus-${{ matrix.platform }}-${{ matrix.arch }}"
+          ./"$BINARY_NAME" version
+          ./"$BINARY_NAME" --help
+
+      - name: Verify binary (Windows)
+        if: matrix.platform == 'win'
+        shell: pwsh
+        run: |
+          .\auditstatus-win-x64.exe version
+          .\auditstatus-win-x64.exe --help
+
+      # Upload to release
+      - name: Upload binary to release (Unix)
+        if: matrix.platform != 'win'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: auditstatus-${{ matrix.platform }}-${{ matrix.arch }}
+
+      - name: Upload binary to release (Windows)
+        if: matrix.platform == 'win'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: auditstatus-win-x64.exe
+
+  upload-installer:
+    name: Upload install script
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Upload install.sh
+        uses: softprops/action-gh-release@v2
+        with:
+          files: scripts/install.sh

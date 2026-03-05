@@ -1,52 +1,165 @@
 {
   "name": "auditstatus",
+  "description": "Automated third-party auditing system for code integrity verification and transparency",
   "version": "1.0.0",
-  "description": "Server auditing and verification tool with PM2 ecosystem support",
-  "main": "lib/index.js",
-  "scripts": {
-    "test": "ava",
-    "test:watch": "ava --watch",
-    "test:coverage": "c8 ava",
-    "lint": "xo",
-    "lint:fix": "xo --fix",
-    "pretest": "npm run lint",
-    "posttest": "npm run test:coverage"
+  "author": "Audit Status Community",
+  "bin": {
+    "auditstatus": "scripts/cli.js"
   },
-  "keywords": [
-    "audit",
-    "server",
-    "verification",
-    "pm2",
-    "ecosystem",
-    "ssh",
-    "attestium"
+  "bugs": {
+    "url": "https://github.com/auditstatus/auditstatus/issues"
+  },
+  "commitlint": {
+    "extends": [
+      "@commitlint/config-conventional"
+    ]
+  },
+  "contributors": [
+    "Audit Status Community"
   ],
-  "author": "AuditStatus Team",
-  "license": "MIT",
   "dependencies": {
-    "attestium": "^1.0.0",
-    "axios": "^1.6.0",
-    "node-ssh": "^13.1.0",
-    "pm2": "^5.3.0"
+    "attestium": "^0.0.1",
+    "axios": "^1.7.9",
+    "commander": "^11.0.0",
+    "cosmiconfig": "^9.0.0",
+    "js-yaml": "^4.1.0",
+    "nodemailer": "^6.9.8"
   },
   "devDependencies": {
-    "ava": "^6.0.0",
-    "xo": "^0.56.0",
-    "sinon": "^17.0.0",
-    "mock-fs": "^5.2.0",
-    "nock": "^13.4.0",
-    "c8": "^8.0.0"
+    "@commitlint/cli": "^19.8.1",
+    "@commitlint/config-conventional": "^19.8.1",
+    "c8": "^10.1.3",
+    "esbuild": "^0.27.3",
+    "fixpack": "^4.0.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.1.2",
+    "marked": "^17.0.0",
+    "prettier": "^3.0.0",
+    "remark-cli": "^12.0.1",
+    "remark-preset-github": "^4.0.4",
+    "xo": "^1.1.0"
   },
   "engines": {
     "node": ">=18.0.0"
   },
+  "files": [
+    "scripts/",
+    "assets/",
+    "README.md",
+    "LICENSE",
+    "auditstatus.config.yml"
+  ],
+  "homepage": "https://auditstatus.com",
+  "keywords": [
+    "attestium",
+    "audit",
+    "audit-status",
+    "auditstatus",
+    "code-integrity",
+    "continuous-verification",
+    "github-actions",
+    "monitoring",
+    "security",
+    "server-audit",
+    "tamper-proof",
+    "third-party",
+    "tpm",
+    "transparency",
+    "verification"
+  ],
+  "license": "MIT",
+  "lint-staged": {
+    "*.js": [
+      "xo --fix"
+    ],
+    "*.md": [
+      "remark . -qfo"
+    ],
+    "package.json": [
+      "fixpack"
+    ]
+  },
+  "main": "scripts/audit-servers.js",
+  "packageManager": "pnpm@9.0.0",
+  "pnpm": {
+    "overrides": {
+      "remark-gfm": "^4.0.1"
+    }
+  },
+  "prettier": {
+    "useTabs": false,
+    "tabWidth": 2,
+    "singleQuote": true
+  },
+  "remarkConfig": {
+    "plugins": [
+      "remark-preset-github"
+    ],
+    "settings": {
+      "bullet": "*",
+      "fences": true,
+      "listItemIndent": "one",
+      "rule": "-"
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/auditstatus/auditstatus.git"
+  },
+  "scripts": {
+    "audit": "node scripts/audit-servers.js",
+    "audit:config": "node scripts/audit-servers.js --config",
+    "audit:debug": "node scripts/audit-servers.js --debug",
+    "audit:dry-run": "node scripts/audit-servers.js --dry-run",
+    "audit:verbose": "node scripts/audit-servers.js --verbose",
+    "build": "node scripts/build-sea.mjs",
+    "build:binary": "bash scripts/build-binary.sh",
+    "c8": "c8 --reporter=text --reporter=html --exclude='dist/**' --exclude='test/**' node --test test/*.js",
+    "check": "node scripts/server-check.js",
+    "check:json": "node scripts/server-check.js --json",
+    "dev": "pnpm run audit:verbose",
+    "init": "node scripts/audit-servers.js --init",
+    "init:force": "node scripts/audit-servers.js --init --force",
+    "lint": "fixpack && remark . -qfo && xo --fix",
+    "pre-commit": "lint-staged",
+    "prepare": "husky",
+    "pretest": "pnpm run lint",
+    "start": "pnpm run audit",
+    "test": "node --test test/*.js",
+    "test-coverage": "c8 --reporter=text --reporter=html --exclude='dist/**' --exclude='test/**' node --test test/*.js",
+    "test:only": "node --test test/*.js",
+    "test:verbose": "pnpm run audit:dry-run -- --verbose",
+    "validate-config": "node scripts/validate-config.js"
+  },
   "xo": {
     "rules": {
       "unicorn/prefer-module": "off",
+      "import-x/extensions": "off",
+      "no-unused-vars": "off",
+      "no-promise-executor-return": "off",
       "n/prefer-global/process": "off",
-      "complexity": "off",
-      "max-depth": "off"
-    }
+      "unicorn/no-array-reduce": "off",
+      "unicorn/prefer-top-level-await": "off",
+      "unicorn/import-style": "off",
+      "no-return-await": "off",
+      "no-await-in-loop": "off",
+      "@stylistic/function-paren-newline": "off",
+      "n/prefer-global/buffer": "off",
+      "unicorn/prevent-abbreviations": "off",
+      "no-return-assign": "off",
+      "promise/prefer-await-to-then": "off",
+      "unicorn/no-process-exit": "off",
+      "no-new": "off",
+      "max-depth": "off",
+      "unicorn/no-this-assignment": "off",
+      "prefer-rest-params": "off",
+      "logical-assignment-operators": "off",
+      "no-dupe-class-members": "off",
+      "no-dupe-keys": "off",
+      "camelcase": "off",
+      "no-bitwise": "off",
+      "import-x/order": "off"
+    },
+    "space": 2
   }
 }
-

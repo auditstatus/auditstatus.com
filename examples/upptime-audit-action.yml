@@ -1,0 +1,46 @@
+# Upptime + Audit Status - Combined Workflow
+#
+# Use this alongside your Upptime configuration to add SSH-based
+# server integrity checks. Upptime monitors HTTP endpoints;
+# this action performs deep server-side verification via SSH.
+#
+# Add this file to .github/workflows/ in your Upptime repository.
+#
+# Required secrets:
+#   AUDIT_HOST     - Server hostname or IP
+#   AUDIT_USER     - SSH username
+#   AUDIT_SSH_KEY  - Read-only SSH deployment key (ed25519 recommended)
+#
+# Setup:
+#   1. Generate a deployment key:
+#      ssh-keygen -t ed25519 -C "upptime-audit" -f upptime_audit_key -N ""
+#   2. Add upptime_audit_key.pub to server authorized_keys with restrictions:
+#      command="/usr/local/bin/auditstatus-check",restrict ssh-ed25519 AAAA... upptime-audit
+#   3. Add the private key as AUDIT_SSH_KEY in your Upptime repo secrets
+
+name: Audit Status Check
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: Server integrity audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Run server audit via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.AUDIT_HOST }}
+          username: ${{ secrets.AUDIT_USER }}
+          key: ${{ secrets.AUDIT_SSH_KEY }}
+          script: |
+            npx auditstatus check --json --project-root /srv/app 2>/dev/null || \
+            node /srv/app/node_modules/auditstatus/scripts/server-check.js --json --project-root /srv/app

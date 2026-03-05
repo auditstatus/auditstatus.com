@@ -1,0 +1,51 @@
+# Audit Status - GitHub Action Template
+#
+# Copy this file to .github/workflows/audit-status.yml in your project.
+#
+# Required secrets:
+#   AUDIT_HOST         - Server hostname or IP
+#   AUDIT_USER         - SSH username (e.g., deploy)
+#   AUDIT_SSH_KEY      - SSH private key (use a read-only deployment key)
+#   AUDIT_SSH_PORT     - SSH port (optional, defaults to 22)
+#   AUDIT_PROJECT_ROOT - Path to the project on the server (optional, defaults to /srv/app)
+#
+# Setup:
+#   1. Generate a read-only SSH deployment key:
+#      ssh-keygen -t ed25519 -C "audit-status" -f audit_key -N ""
+#   2. Add audit_key.pub to the server's ~/.ssh/authorized_keys
+#   3. Add audit_key (private) as AUDIT_SSH_KEY in GitHub repo secrets
+#   4. Add AUDIT_HOST and AUDIT_USER as GitHub repo secrets
+#   5. Install auditstatus on your server: npm install -g auditstatus
+#
+# Badge:
+#   Add this to your README:
+#   [![Audit Status](https://img.shields.io/endpoint?url=https://your-server.com/audit-badge.json)](https://github.com/your-org/your-repo/actions/workflows/audit-status.yml)
+
+name: Audit Status
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: Server integrity audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Run audit via SSH
+        id: audit
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.AUDIT_HOST }}
+          username: ${{ secrets.AUDIT_USER }}
+          key: ${{ secrets.AUDIT_SSH_KEY }}
+          port: ${{ secrets.AUDIT_SSH_PORT || 22 }}
+          script: |
+            cd ${{ secrets.AUDIT_PROJECT_ROOT || '/srv/app' }}
+            npx auditstatus check --json --project-root .

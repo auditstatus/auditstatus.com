@@ -1,0 +1,44 @@
+name: Audit Status
+
+on:
+  schedule:
+    # Run audit every 6 hours
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      server:
+        description: 'Server to audit (leave empty for all)'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  audit:
+    name: Server integrity audit
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run audit via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.AUDIT_HOST }}
+          username: ${{ secrets.AUDIT_USER }}
+          key: ${{ secrets.AUDIT_SSH_KEY }}
+          port: ${{ secrets.AUDIT_SSH_PORT || 22 }}
+          script: |
+            cd ${{ secrets.AUDIT_PROJECT_ROOT || '/srv/app' }}
+            npx auditstatus check --json --project-root . 2>/dev/null || node scripts/server-check.js --json --project-root .
+
+      - name: Upload audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: audit-report-${{ github.run_number }}
+          path: audit-reports/
+          retention-days: 90
