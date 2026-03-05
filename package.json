@@ -43,11 +43,13 @@
     "node": ">=18.0.0"
   },
   "files": [
-    "scripts/",
-    "assets/",
-    "README.md",
+    "scripts/audit-servers.js",
+    "scripts/badge.js",
+    "scripts/cli.js",
+    "scripts/server-check.js",
+    "scripts/validate-config.js",
     "LICENSE",
-    "auditstatus.config.yml"
+    "README.md"
   ],
   "homepage": "https://auditstatus.com",
   "keywords": [
