@@ -32,10 +32,10 @@
     "esbuild": "^0.27.3",
     "fixpack": "^4.0.0",
     "husky": "^9.1.7",
-    "lint-staged": "^16.1.2",
+    "lint-staged": "^15.5.2",
     "marked": "^17.0.0",
     "prettier": "^3.0.0",
-    "remark-cli": "^12.0.1",
+    "remark-cli": "^11.0.0",
     "remark-preset-github": "^4.0.4",
     "xo": "^1.1.0"
   },
@@ -83,11 +83,6 @@
   },
   "main": "scripts/audit-servers.js",
   "packageManager": "pnpm@9.0.0",
-  "pnpm": {
-    "overrides": {
-      "remark-gfm": "^4.0.1"
-    }
-  },
   "prettier": {
     "useTabs": false,
     "tabWidth": 2,
@@ -116,7 +111,7 @@
     "audit:verbose": "node scripts/audit-servers.js --verbose",
     "build": "node scripts/build-sea.mjs",
     "build:binary": "bash scripts/build-binary.sh",
-    "c8": "c8 --reporter=text --reporter=html --exclude='dist/**' --exclude='test/**' node --test test/*.js",
+    "c8": "c8 --reporter=text --reporter=html --reporter=lcov --exclude='dist/**' --exclude='test/**' node --test",
     "check": "node scripts/server-check.js",
     "check:json": "node scripts/server-check.js --json",
     "dev": "pnpm run audit:verbose",
@@ -127,9 +122,9 @@
     "prepare": "husky",
     "pretest": "pnpm run lint",
     "start": "pnpm run audit",
-    "test": "node --test test/*.js",
-    "test-coverage": "c8 --reporter=text --reporter=html --exclude='dist/**' --exclude='test/**' node --test test/*.js",
-    "test:only": "node --test test/*.js",
+    "test": "node --test",
+    "test-coverage": "c8 --reporter=text --reporter=html --reporter=lcov --exclude='dist/**' --exclude='test/**' node --test",
+    "test:only": "node --test",
     "test:verbose": "pnpm run audit:dry-run -- --verbose",
     "validate-config": "node scripts/validate-config.js"
   },

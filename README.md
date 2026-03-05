@@ -1,8 +1,8 @@
 # Audit Status
 
-[![CI](https://github.com/auditstatus/auditstatus/actions/workflows/ci.yml/badge.svg)](https://github.com/auditstatus/auditstatus/actions/workflows/ci.yml)
-[![Coverage Status](https://coveralls.io/repos/github/auditstatus/auditstatus/badge.svg)](https://coveralls.io/github/auditstatus/auditstatus)
-[![npm version](https://badge.fury.io/js/auditstatus.svg)](https://badge.fury.io/js/auditstatus)
+[![CI](https://github.com/auditstatus/auditstatus.com/actions/workflows/ci.yml/badge.svg)](https://github.com/auditstatus/auditstatus.com/actions/workflows/ci.yml)
+[![Coverage Status](https://coveralls.io/repos/github/auditstatus/auditstatus.com/badge.svg)](https://coveralls.io/github/auditstatus/auditstatus.com)
+[![npm version](https://img.shields.io/npm/v/auditstatus.svg)](https://www.npmjs.com/package/auditstatus)
 
 ![Audit Status Banner](./assets/banner.png)
 
@@ -265,14 +265,14 @@ console.log(`Hardware Backed: ${securityStatus.hardwareBacked}`);
 
 ### 📊 **Security Mode Comparison**
 
-| Feature | TPM 2.0 Mode | Software Fallback |
-|--- |--- |--- |
-| **Key Protection** | Hardware-secured | Software-encrypted |
-| **Random Generation** | Hardware TRNG | Software PRNG |
-| **Boot Verification** | Measured boot | Process verification |
-| **Tamper Resistance** | Hardware-backed | Cryptographic |
-| **Performance** | Optimized | Standard |
-| **Availability** | Production servers | All environments |
+| Feature               | TPM 2.0 Mode       | Software Fallback    |
+| --------------------- | ------------------ | -------------------- |
+| **Key Protection**    | Hardware-secured   | Software-encrypted   |
+| **Random Generation** | Hardware TRNG      | Software PRNG        |
+| **Boot Verification** | Measured boot      | Process verification |
+| **Tamper Resistance** | Hardware-backed    | Cryptographic        |
+| **Performance**       | Optimized          | Standard             |
+| **Availability**      | Production servers | All environments     |
 
 ### ⚠️ **Security Considerations**
 
@@ -786,11 +786,11 @@ Audit Status ships as a [Node.js Single Executable Application](https://nodejs.o
 
 Grab the latest binary from [GitHub Releases](https://github.com/auditstatus/auditstatus/releases/latest):
 
-| Platform | Binary | Architecture |
-|---|---|---|
-| Linux | `auditstatus-linux` | x64 |
-| macOS | `auditstatus-macos` | x64 / arm64 (universal) |
-| Windows | `auditstatus-windows.exe` | x64 |
+| Platform | Binary                    | Architecture            |
+| -------- | ------------------------- | ----------------------- |
+| Linux    | `auditstatus-linux`       | x64                     |
+| macOS    | `auditstatus-macos`       | x64 / arm64 (universal) |
+| Windows  | `auditstatus-windows.exe` | x64                     |
 
 ### One-Line Install (Linux / macOS)
 
