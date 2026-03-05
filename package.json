@@ -7,7 +7,7 @@
     "auditstatus": "scripts/cli.js"
   },
   "bugs": {
-    "url": "https://github.com/auditstatus/auditstatus/issues"
+    "url": "https://github.com/auditstatus/auditstatus.com/issues"
   },
   "commitlint": {
     "extends": [
@@ -106,7 +106,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/auditstatus/auditstatus.git"
+    "url": "https://github.com/auditstatus/auditstatus.com.git"
   },
   "scripts": {
     "audit": "node scripts/audit-servers.js",
