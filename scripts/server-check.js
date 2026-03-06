@@ -235,13 +235,24 @@ class ServerCheck {
     const result = {name: 'running-processes', passed: false, details: {}};
 
     try {
-      const psOutput = execSync('ps aux', {
-        encoding: 'utf8',
-        timeout: 5000,
-      });
+      let lines;
 
-      const lines = psOutput.trim().split('\n');
-      result.details.totalProcesses = lines.length - 1; // Minus header
+      if (os.platform() === 'win32') {
+        // On Windows, use 'tasklist' which is always available
+        const taskOutput = execSync('tasklist /FO CSV /NH', {
+          encoding: 'utf8',
+          timeout: 10_000,
+        });
+        lines = taskOutput.trim().split('\n').filter(Boolean);
+        result.details.totalProcesses = lines.length;
+      } else {
+        const psOutput = execSync('ps aux', {
+          encoding: 'utf8',
+          timeout: 5000,
+        });
+        lines = psOutput.trim().split('\n');
+        result.details.totalProcesses = lines.length - 1; // Minus header
+      }
 
       // Check for expected processes
       if (this.expectedProcesses.length > 0) {
@@ -249,18 +260,28 @@ class ServerCheck {
         let allFound = true;
 
         for (const proc of this.expectedProcesses) {
-          const matchingLines = lines.filter(line => line.includes(proc));
+          const matchingLines = lines.filter(line => line.toLowerCase().includes(proc.toLowerCase()));
           const found = matchingLines.length > 0;
           const processInfo = {found, pids: []};
 
           if (found) {
             // Extract PIDs and verify each process's executable
             for (const line of matchingLines) {
-              const parts = line.trim().split(/\s+/);
-              const pid = parts[1];
-              const pidInfo = this._verifyProcessExecutable(pid);
-              if (pidInfo) {
-                processInfo.pids.push(pidInfo);
+              let pid;
+              if (os.platform() === 'win32') {
+                // Tasklist CSV: "Image Name","PID","Session Name",...
+                const match = line.match(/"[^"]+","(\d+)"/);
+                pid = match ? match[1] : null;
+              } else {
+                const parts = line.trim().split(/\s+/);
+                pid = parts[1];
+              }
+
+              if (pid) {
+                const pidInfo = this._verifyProcessExecutable(pid);
+                if (pidInfo) {
+                  processInfo.pids.push(pidInfo);
+                }
               }
             }
           }
@@ -274,7 +295,7 @@ class ServerCheck {
         result.passed = allFound;
       } else {
         // No specific processes expected, just report what's running
-        const nodeProcesses = lines.filter(l => l.includes('node'));
+        const nodeProcesses = lines.filter(l => l.toLowerCase().includes('node'));
         result.details.nodeProcesses = nodeProcesses.length;
         result.passed = true;
       }
@@ -301,6 +322,28 @@ class ServerCheck {
 
       if (os.platform() === 'linux') {
         exePath = fs.readlinkSync(`/proc/${pid}/exe`);
+      } else if (os.platform() === 'win32') {
+        // On Windows, use WMIC to get the executable path for a given PID
+        try {
+          const wmicOutput = execSync(
+            `wmic process where ProcessId=${pid} get ExecutablePath /FORMAT:LIST`,
+            {encoding: 'utf8', timeout: 5000},
+          ).trim();
+          const match = wmicOutput.match(/ExecutablePath=(.+)/);
+          if (match) {
+            exePath = match[1].trim();
+          }
+        } catch {
+          // WMIC failed, try PowerShell
+          try {
+            exePath = execSync(
+              `powershell -NoProfile -Command "(Get-Process -Id ${pid}).Path"`,
+              {encoding: 'utf8', timeout: 5000},
+            ).trim();
+          } catch {
+            // PowerShell failed too
+          }
+        }
       } else {
         // On macOS (and other Unix), use lsof -d txt to find the main executable
         try {
@@ -351,6 +394,13 @@ class ServerCheck {
             .filter(Boolean)
             .join(' ');
           info.cmdline = cmdline;
+        } else if (os.platform() === 'win32') {
+          const wmicCmd = execSync(
+            `wmic process where ProcessId=${pid} get CommandLine /FORMAT:LIST`,
+            {encoding: 'utf8', timeout: 5000},
+          ).trim();
+          const match = wmicCmd.match(/CommandLine=(.+)/);
+          info.cmdline = match ? match[1].trim() : null;
         } else {
           const psOutput = execSync(`ps -p ${pid} -o args=`, {
             encoding: 'utf8',
@@ -484,10 +534,17 @@ class ServerCheck {
 
       for (const bin of binaries) {
         try {
-          const binPath = execSync(`which ${bin}`, {
+          // On Windows, use 'where' instead of 'which' and handle .exe extension
+          const whichCmd = os.platform() === 'win32' ? 'where' : 'which';
+          let binPath = execSync(`${whichCmd} ${bin}`, {
             encoding: 'utf8',
             timeout: 5000,
           }).trim();
+
+          // 'where' on Windows may return multiple lines; take the first
+          if (os.platform() === 'win32' && binPath.includes('\n')) {
+            binPath = binPath.split('\n')[0].trim();
+          }
 
           const content = fs.readFileSync(binPath);
           const hash = crypto.createHash('sha256').update(content).digest('hex');
