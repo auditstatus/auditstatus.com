@@ -360,8 +360,12 @@ describe('install.sh', () => {
   it('install script exists and is executable', () => {
     const installPath = path.join(__dirname, '..', 'scripts', 'install.sh');
     assert.ok(fs.existsSync(installPath));
-    const stats = fs.statSync(installPath);
-    assert.ok(stats.mode & 0o111, 'install.sh should be executable');
+    // Windows (NTFS) does not support Unix file permission bits;
+    // the executable bit is only meaningful on POSIX systems.
+    if (process.platform !== 'win32') {
+      const stats = fs.statSync(installPath);
+      assert.ok(stats.mode & 0o111, 'install.sh should be executable');
+    }
   });
 
   it('install script contains correct URLs', () => {
@@ -378,8 +382,12 @@ describe('build-binary.sh', () => {
   it('build script exists and is executable', () => {
     const buildPath = path.join(__dirname, '..', 'scripts', 'build-binary.sh');
     assert.ok(fs.existsSync(buildPath));
-    const stats = fs.statSync(buildPath);
-    assert.ok(stats.mode & 0o111, 'build-binary.sh should be executable');
+    // Windows (NTFS) does not support Unix file permission bits;
+    // the executable bit is only meaningful on POSIX systems.
+    if (process.platform !== 'win32') {
+      const stats = fs.statSync(buildPath);
+      assert.ok(stats.mode & 0o111, 'build-binary.sh should be executable');
+    }
   });
 
   it('build script contains platform detection', () => {
