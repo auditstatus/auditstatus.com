@@ -9,7 +9,8 @@
  *
  * Checks: code integrity (via Attestium), git hash, running processes
  * (with /proc/<pid>/exe verification on Linux), PM2 state (with script
- * hash verification), signed binaries, and TPM attestation.
+ * hash verification), signed binaries, TPM attestation, process memory
+ * integrity, and release verification (running vs disk vs official).
  *
  * Usage:
  *   npx auditstatus check [options]
@@ -25,6 +26,8 @@ const crypto = require('node:crypto');
 const {execSync} = require('node:child_process');
 const os = require('node:os');
 const Attestium = require('attestium');
+const ProcessIntegrity = require('attestium/process-integrity');
+const ReleaseVerification = require('attestium/release-verification');
 
 class ServerCheck {
   constructor(options = {}) {
@@ -37,6 +40,10 @@ class ServerCheck {
     this.expectedProcesses = options.expectedProcesses || [];
     this.expectedBinaryHashes = options.expectedBinaryHashes || {};
     this.json = options.json || false;
+    this.checkProcessIntegrity = options.checkProcessIntegrity !== false;
+    this.checkReleaseVerification = options.checkReleaseVerification !== false;
+    this.expectedLibs = options.expectedLibs || [];
+    this.releaseOptions = options.releaseOptions || {};
 
     // Initialize Attestium for code verification and TPM attestation
     if (options.attestium) {
@@ -96,6 +103,14 @@ class ServerCheck {
 
     if (this.enableTpm) {
       this.results.checks.tpm = await this.checkTpmAttestation();
+    }
+
+    if (this.checkProcessIntegrity) {
+      this.results.checks.processIntegrity = this.checkProcessMemoryIntegrity();
+    }
+
+    if (this.checkReleaseVerification) {
+      this.results.checks.releaseVerification = await this.checkReleaseIntegrity();
     }
 
     // Determine overall pass/fail
@@ -672,6 +687,85 @@ class ServerCheck {
   }
 
   /**
+	 * Check process memory integrity using Attestium's ProcessIntegrity module.
+	 * Analyzes memory maps, executable page hashes, linker state,
+	 * debugger attachment, and file descriptors.
+	 */
+  checkProcessMemoryIntegrity() {
+    const result = {name: 'process-memory-integrity', passed: true, details: {}};
+
+    try {
+      const pi = new ProcessIntegrity({
+        expectedLibs: this.expectedLibs,
+      });
+
+      // Check own process
+      const report = pi.checkAll(process.pid);
+      result.details.selfCheck = report;
+
+      // Flag failures
+      if (report.linkerIntegrity && report.linkerIntegrity.clean === false) {
+        result.passed = false;
+        result.details.linkerCompromised = true;
+      }
+
+      if (report.tracerPid && report.tracerPid.traced === true) {
+        result.passed = false;
+        result.details.debuggerAttached = true;
+      }
+
+      if (report.fileDescriptors && report.fileDescriptors.suspicious.length > 0) {
+        result.details.suspiciousFds = report.fileDescriptors.suspicious.length;
+      }
+
+      if (report.executablePageHash && report.executablePageHash.matched === false) {
+        result.passed = false;
+        result.details.memoryTampered = true;
+      }
+
+      if (report.memoryMaps && report.memoryMaps.summary.anonExecExcessive) {
+        result.details.excessiveAnonExec = true;
+      }
+
+      if (report.memoryMaps && report.memoryMaps.summary.deletedBackings > 0) {
+        result.details.deletedBackings = report.memoryMaps.summary.deletedBackings;
+      }
+    } catch (error) {
+      result.details.error = error.message;
+    }
+
+    return result;
+  }
+
+  /**
+	 * Check release integrity using Attestium's ReleaseVerification module.
+	 * Verifies Node.js, npm, pnpm, pm2 against official releases,
+	 * and installed modules against npm registry + GitHub source.
+	 */
+  async checkReleaseIntegrity() {
+    const result = {name: 'release-integrity', passed: true, details: {}};
+
+    try {
+      const rv = new ReleaseVerification({
+        projectRoot: this.projectRoot,
+        ...this.releaseOptions,
+      });
+
+      const report = await rv.verifyAll({
+        globalPackages: this.releaseOptions.globalPackages || ['npm', 'pnpm', 'pm2'],
+        modules: this.releaseOptions.modules,
+      });
+
+      result.details = report;
+      result.passed = report.passed;
+    } catch (error) {
+      result.details.error = error.message;
+    }
+
+    return result;
+  }
+
+  /**
 	 * Get project files for checksum calculation.
 	 */
   _getProjectFiles(dir, files = []) {
@@ -703,7 +797,13 @@ class ServerCheck {
     }
 
     const lines = [];
-    lines.push('', `Audit Status Check - ${this.results.timestamp}`, `Host: ${this.results.hostname} (${this.results.platform}/${this.results.arch})`, '');
+    const {hostname, platform: plat, arch} = this.results;
+    lines.push(
+      '',
+      `Audit Status Check - ${this.results.timestamp}`,
+      `Host: ${hostname} (${plat}/${arch})`,
+      '',
+    );
 
     for (const [key, check] of Object.entries(this.results.checks)) {
       const icon = check.passed ? '\u2705' : '\u274C';
@@ -713,32 +813,68 @@ class ServerCheck {
         lines.push(`  Error: ${check.details.error}`);
       }
 
-      /* c8 ignore next 3 - only when git hash is available */
-      if (key === 'git' && check.details.currentHash) {
-        lines.push(`  Hash: ${check.details.shortHash} (clean: ${check.details.clean})`);
-      }
-
-      if (key === 'code' && check.details.fileCount) {
-        lines.push(`  Files: ${check.details.fileCount}, Checksum: ${check.details.overallChecksum?.slice(0, 12)}...`);
-      }
-
-      /* c8 ignore next 3 - only when PM2 is running */
-      if (key === 'pm2' && check.details.processCount) {
-        lines.push(`  Processes: ${check.details.processCount}, All online: ${check.details.allOnline}`);
-      }
-
-      if (key === 'tpm') {
-        lines.push(`  Mode: ${check.details.mode || 'unknown'}`);
-      }
-
-      if (key === 'binaries' && check.details.runningNodeExe) {
-        lines.push(`  Running node: ${check.details.runningNodeExe} (matches disk: ${check.details.runningNodeMatchesDisk})`);
-      }
+      this._formatCheckDetail(key, check, lines);
     }
 
-    lines.push('', `Result: ${this.results.passed ? 'PASSED' : 'FAILED'} (${this.results.summary})`, '');
+    const verdict = this.results.passed ? 'PASSED' : 'FAILED';
+    lines.push('', `Result: ${verdict} (${this.results.summary})`, '');
 
     return lines.join('\n');
+  }
+
+  _formatCheckDetail(key, check, lines) {
+    const d = check.details;
+
+    /* c8 ignore next 3 - only when git hash is available */
+    if (key === 'git' && d.currentHash) {
+      lines.push(`  Hash: ${d.shortHash} (clean: ${d.clean})`);
+    }
+
+    if (key === 'code' && d.fileCount) {
+      lines.push(`  Files: ${d.fileCount}, Checksum: ${d.overallChecksum?.slice(0, 12)}...`);
+    }
+
+    /* c8 ignore next 3 - only when PM2 is running */
+    if (key === 'pm2' && d.processCount) {
+      lines.push(`  Processes: ${d.processCount}, All online: ${d.allOnline}`);
+    }
+
+    if (key === 'tpm') {
+      lines.push(`  Mode: ${d.mode || 'unknown'}`);
+    }
+
+    if (key === 'binaries' && d.runningNodeExe) {
+      lines.push(`  Running node: ${d.runningNodeExe} (matches disk: ${d.runningNodeMatchesDisk})`);
+    }
+
+    if (key === 'processIntegrity') {
+      this._formatProcessIntegrity(d, lines);
+    }
+
+    if (key === 'releaseVerification' && d.summary) {
+      lines.push(`  ${d.summary}`);
+    }
+  }
+
+  _formatProcessIntegrity(details, lines) {
+    const sc = details.selfCheck;
+    if (!sc) {
+      return;
+    }
+
+    const linkerClean = sc.linkerIntegrity?.clean ?? 'n/a';
+    const traced = sc.tracerPid?.traced ?? 'n/a';
+    const suspFds = sc.fileDescriptors?.suspicious?.length ?? 0;
+    lines.push(
+      `  Linker clean: ${linkerClean}`,
+      `  Debugger attached: ${traced}`,
+      `  Suspicious FDs: ${suspFds}`,
+    );
+
+    const pageMatch = sc.executablePageHash?.matched;
+    if (pageMatch !== null && pageMatch !== undefined) {
+      lines.push(`  Executable pages match disk: ${pageMatch}`);
+    }
   }
 }
 
@@ -781,6 +917,16 @@ if (require.main === module) {
 
       case '--no-binaries': {
         options.checkSignedBinaries = false;
+        break;
+      }
+
+      case '--no-process-integrity': {
+        options.checkProcessIntegrity = false;
+        break;
+      }
+
+      case '--no-release-verification': {
+        options.checkReleaseVerification = false;
         break;
       }
 

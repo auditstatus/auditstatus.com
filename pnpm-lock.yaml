@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       attestium:
-        specifier: ^0.0.1
-        version: 0.0.1(typescript@5.9.3)
+        specifier: ^0.0.3
+        version: 0.0.3(typescript@5.9.3)
       axios:
         specifier: ^1.7.9
         version: 1.13.6
@@ -766,8 +766,8 @@ packages:
   asynckit@0.4.0:
     resolution: {integrity: sha512-Oei9OH4tRh0YqU3GxhX79dM/mwVgvbZJaSNaRk+bshkj0S5cfHcgYakreBjrHwatXKbz+IoIdYLxrKim2MjW0Q==}
 
-  attestium@0.0.1:
-    resolution: {integrity: sha512-tx7MolURcOWF3dv/lG582+SwsF7sfnhrs4+KwgWnshNSPg/CaDyI41sThcouI41i3TmjsxZnPhqq72MNAg72Yw==}
+  attestium@0.0.3:
+    resolution: {integrity: sha512-Wq5tOd58oVf+jC0Y1hUeynZ0AxgrdQuxux3dYdHXWxhslMlNLaVt7Qbmxq/YUp27gJ1qgu0IegNPZRDQDSDeIw==}
     engines: {node: '>=18.0.0'}
 
   author-regex@1.0.0:
@@ -4121,7 +4121,7 @@ snapshots:
 
   asynckit@0.4.0: {}
 
-  attestium@0.0.1(typescript@5.9.3):
+  attestium@0.0.3(typescript@5.9.3):
     dependencies:
       cosmiconfig: 9.0.1(typescript@5.9.3)
       trusted-platform-module-2: 1.0.0

@@ -18,7 +18,7 @@
     "Audit Status Community"
   ],
   "dependencies": {
-    "attestium": "^0.0.1",
+    "attestium": "^0.0.3",
     "axios": "^1.7.9",
     "commander": "^11.0.0",
     "cosmiconfig": "^9.0.0",
