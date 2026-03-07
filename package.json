@@ -1,7 +1,7 @@
 {
   "name": "auditstatus",
   "description": "Automated third-party auditing system for code integrity verification and transparency",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "author": "Audit Status Community",
   "bin": {
     "auditstatus": "scripts/cli.js"
