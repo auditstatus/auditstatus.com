@@ -59,7 +59,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: auditstatus-*
           merge-multiple: true
@@ -101,7 +101,7 @@ jobs:
 
       # The image holds the same binaries as the release, so a verifier can
       # match the attester inside it with SHA256SUMS.
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: auditstatus-linux-*
           merge-multiple: true
