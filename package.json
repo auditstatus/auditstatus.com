@@ -1,7 +1,7 @@
 {
   "name": "auditstatus",
   "description": "Remote attestation of what a server is running: an attester for your servers and a verifier for CI",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "author": "Audit Status Community",
   "bin": {
     "auditstatus": "scripts/cli.js"
