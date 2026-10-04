@@ -1,0 +1,17 @@
+# Verifier configuration for Go (static binaries).
+version: 2
+services:
+  - name: app
+    repository:
+      url: https://github.com/example/api.git
+      branch: main
+    # The binary is built by CI from a commit; the release directory holds
+    # it and its attested manifest.
+    artifact:
+      signer:
+        repository: example/api
+        workflow: .github/workflows/release.yml
+    goModule: .
+servers:
+  - name: app1
+    host: app1.example.com

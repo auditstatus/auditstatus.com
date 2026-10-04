@@ -1,0 +1,116 @@
+---
+- name: Check the settings
+  ansible.builtin.assert:
+    that:
+      - auditstatus_sha256 | length == 64
+      - auditstatus_config.services | default([]) | length > 0
+      # One key per entry, on one line: authorized_keys.j2 gives each line the forced command.
+      - auditstatus_verifier_keys | select('search', '[\r\n]') | list | length == 0
+    fail_msg: Set auditstatus_sha256 (from the release's SHA256SUMS), at least one service in auditstatus_config, and one public key per line in auditstatus_verifier_keys.
+
+- name: Create the verifier's account
+  ansible.builtin.user:
+    name: "{{ auditstatus_user }}"
+    system: true
+    shell: /bin/sh
+    create_home: true
+    groups: "{{ [auditstatus_tpm_group] if auditstatus_tpm else [] }}"
+    append: true
+  register: auditstatus_account
+
+# Only root and the verifier's account can run it: with its capabilities it
+# reads files other local users cannot.
+- name: Install the attester
+  ansible.builtin.get_url:
+    url: "{{ auditstatus_url }}"
+    dest: "{{ auditstatus_bin }}"
+    checksum: "sha256:{{ auditstatus_sha256 }}"
+    owner: root
+    group: "{{ auditstatus_user }}"
+    mode: "0750"
+  register: auditstatus_binary
+
+- name: Install the capability tools
+  ansible.builtin.package:
+    name: "{{ 'libcap2-bin' if ansible_os_family == 'Debian' else 'libcap' }}"
+  when: auditstatus_capabilities
+
+- name: Read the attester's capabilities
+  ansible.builtin.command: getcap {{ auditstatus_bin }}
+  register: auditstatus_getcap
+  changed_when: false
+  when: auditstatus_capabilities
+
+- name: Let the attester read other users' processes and files
+  ansible.builtin.command: setcap cap_sys_ptrace,cap_dac_read_search+ep {{ auditstatus_bin }}
+  when: auditstatus_capabilities and ('cap_dac_read_search,cap_sys_ptrace=ep' not in auditstatus_getcap.stdout or auditstatus_binary.changed)
+  changed_when: true
+
+# Owned by root so the account cannot replace its own keys.
+- name: Create the verifier's SSH directory
+  ansible.builtin.file:
+    path: "{{ auditstatus_account.home }}/.ssh"
+    state: directory
+    owner: root
+    group: "{{ auditstatus_user }}"
+    mode: "0755"
+
+- name: Allow the verifier's keys to run the attester and nothing else
+  ansible.builtin.template:
+    src: authorized_keys.j2
+    dest: "{{ auditstatus_account.home }}/.ssh/authorized_keys"
+    owner: root
+    group: "{{ auditstatus_user }}"
+    mode: "0644"
+
+- name: Create the configuration directory
+  ansible.builtin.file:
+    path: /etc/auditstatus
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Write the configuration
+  ansible.builtin.copy:
+    content: "{{ auditstatus_config | to_nice_yaml(indent=2) }}"
+    dest: /etc/auditstatus/config.yml
+    owner: root
+    group: root
+    mode: "0644"
+    validate: "{{ auditstatus_bin }} validate --role attester --config %s"
+
+- name: Install the monitor
+  when: auditstatus_monitor
+  block:
+    - name: Install bpftrace
+      ansible.builtin.package:
+        name: bpftrace
+
+    - name: Install the monitor service
+      ansible.builtin.template:
+        src: auditstatus-monitor.service.j2
+        dest: /etc/systemd/system/auditstatus-monitor.service
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Restart the monitor
+
+    - name: Start the monitor
+      ansible.builtin.systemd_service:
+        name: auditstatus-monitor
+        enabled: true
+        state: started
+        daemon_reload: true
+
+- name: Check the setup
+  ansible.builtin.command: "{{ auditstatus_bin }} doctor --config /etc/auditstatus/config.yml"
+  become: true
+  become_user: "{{ auditstatus_user }}"
+  register: auditstatus_doctor
+  changed_when: false
+  failed_when: auditstatus_doctor.rc not in [0, 1]
+
+- name: Report the setup check
+  ansible.builtin.debug:
+    msg: "{{ auditstatus_doctor.stdout_lines }}"

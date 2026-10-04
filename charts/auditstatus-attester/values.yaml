@@ -1,0 +1,84 @@
+# The attester runs on every node (a DaemonSet) and answers the verifier on
+# the pod's loopback interface; the verifier reaches it with
+# `kubectl port-forward`, so it needs no Service and no open port.
+
+image:
+  repository: ghcr.io/auditstatus/attester
+  tag: "v2.0.0"
+  # Pin by digest in production (sha256:..., from the release): the image
+  # is then pulled as tag@digest, and a moved tag cannot change it.
+  digest: ""
+  pullPolicy: IfNotPresent
+
+# The loopback port the attester listens on in each pod.  The verifier's
+# port-forward connects to it: set kubernetes.port in the verifier
+# configuration to the same value when it is not 8740.
+port: 8740
+
+# The attester configuration (/etc/auditstatus/config.yml).  Each service
+# is a set of containers; see examples/attester.yml for every setting.
+config:
+  version: 2
+  services: []
+  #  - name: web
+  #    container:
+  #      label: app.kubernetes.io/name=web
+  #  - name: worker
+  #    container:
+  #      image: ghcr.io/example/worker
+  containers:
+    # Identify containers through the CRI (containerd, CRI-O).
+    crictl: /usr/local/bin/crictl
+    hashRootfs: true
+  distro:
+    # The node's package database, seen through the host's PID 1.
+    root: /proc/1/root
+  tpm:
+    enabled: auto
+
+# The node's CRI socket.
+cri:
+  socket: /run/containerd/containerd.sock
+
+tpm:
+  # Access to /dev/tpmrm0.  Device nodes need a privileged container, or a
+  # device plugin that exposes the TPM as a resource (set resourceName).
+  enabled: false
+  privileged: false
+  resourceName: ""
+
+ima:
+  # Mount securityfs read-only for the IMA log.
+  enabled: false
+
+# The attester needs no network: it listens on the pod's loopback interface,
+# which kubectl port-forward reaches without passing any NetworkPolicy, and
+# makes no connections.  This policy denies all other traffic to and from
+# its pods (where the cluster enforces NetworkPolicy).
+networkPolicy:
+  enabled: true
+
+# Access for the verifier: a ServiceAccount that may list the attester pods
+# and port-forward to them, and nothing else.  The Role covers every pod in
+# the release's namespace, so install the chart in a namespace of its own.  Create a token for CI with:
+#   kubectl -n <namespace> create token auditstatus-verifier --duration 8760h
+verifier:
+  create: true
+  name: auditstatus-verifier
+
+resources:
+  requests:
+    cpu: 10m
+    memory: 64Mi
+  limits:
+    memory: 1Gi
+
+# Run on every node, including tainted ones.
+tolerations:
+  - operator: Exists
+nodeSelector: {}
+priorityClassName: ""
+
+# Some distributions confine ptrace with AppArmor; the attester reads other
+# processes' memory maps and executable pages.
+appArmorProfile: RuntimeDefault

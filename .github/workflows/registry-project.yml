@@ -1,0 +1,357 @@
+name: Registry project
+
+# One project of the registry (registry/<project>.yml), called by
+# registry.yml for each project:
+#
+#   build    reproduces the project's build for the commits its servers run,
+#            as an unprivileged account, into the cache; no SSH key
+#   audit    collects each server's evidence with Audit Status's SSH key
+#            (the verifier environment) and appraises it, with builds from
+#            the cache only: this job runs no code of the project
+#   rebuild  when a server failed or was inconclusive: waits
+#   again    policy.retryAfterSeconds (a deploy in progress), builds and
+#            collects that server again
+#
+# The report is the artifact report-<project>, which registry.yml publishes.
+
+on:
+  workflow_call:
+    inputs:
+      project:
+        description: The project (registry/<project>.yml)
+        required: true
+        type: string
+      build:
+        description: Whether the project has a build
+        required: true
+        type: boolean
+      apt:
+        description: Ubuntu packages its build needs (space-separated)
+        required: false
+        type: string
+        default: ''
+      node:
+        description: The Node.js version of its builds
+        required: false
+        type: string
+        default: '22'
+
+permissions: {}
+
+env:
+  PROJECT: ${{ inputs.project }}
+  WORK: .cache/auditstatus/registry/${{ inputs.project }}
+  # The same in every job: the build cache key includes it (and PATH, so
+  # every job sets up the same Node.js version).
+  AUDITSTATUS_BUILD_USER: auditstatus-build
+
+jobs:
+  build:
+    name: Build (no key)
+    if: inputs.build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/registry-setup
+        with:
+          node-version: ${{ inputs.node }}
+          build-user: auditstatus-build
+
+      - name: Install the build's packages
+        if: inputs.apt != ''
+        env:
+          APT: ${{ inputs.apt }}
+        run: |
+          read -ra packages <<< "$APT"
+          for package in "${packages[@]}"; do
+            if ! [[ "$package" =~ ^[a-z0-9][a-z0-9.+-]{1,63}$ ]]; then
+              echo "::error::Not an Ubuntu package name: $package"
+              exit 1
+            fi
+          done
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends "${packages[@]}"
+
+      # Written only by the audit jobs, which run no code of the project.
+      - name: Restore the references
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ${{ env.WORK }}/cache
+            !${{ env.WORK }}/cache/builds
+          key: registry/${{ inputs.project }}/refs/latest
+          restore-keys: registry/${{ inputs.project }}/refs/
+
+      - name: Restore the builds
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ env.WORK }}/cache/builds
+          key: registry/${{ inputs.project }}/builds/latest
+          restore-keys: registry/${{ inputs.project }}/builds/
+
+      # The commits the servers ran at the last audit are built too.
+      - name: Download the last published report
+        run: |
+          if ! curl -fsSL --retry 3 -o "$RUNNER_TEMP/previous.json" "https://raw.githubusercontent.com/$GITHUB_REPOSITORY/status/projects/$PROJECT/report.json"; then
+            echo '{}' > "$RUNNER_TEMP/previous.json"
+          fi
+
+      - name: Build
+        run: node scripts/cli.js registry build --project "$PROJECT" --work "$WORK" --previous "$RUNNER_TEMP/previous.json"
+
+      - name: Save the builds
+        # Also after a timeout: each build in the cache is complete.
+        if: ${{ always() && hashFiles(format('{0}/cache/builds/*.json', env.WORK)) != '' }}
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ env.WORK }}/cache/builds
+          key: registry/${{ inputs.project }}/builds/${{ hashFiles(format('{0}/cache/builds/*.json', env.WORK)) }}
+
+  audit:
+    name: Audit
+    needs: build
+    # Also when the build failed or was skipped: the report says so.
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment: verifier
+    permissions:
+      contents: read
+    outputs:
+      retry-after: ${{ steps.audit.outputs.retry-after }}
+      retry-servers: ${{ steps.audit.outputs.retry-servers }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/registry-setup
+        with:
+          node-version: ${{ inputs.node }}
+
+      # System packages of Debian servers are checked with this keyring
+      # (Ubuntu runners carry only Ubuntu's).
+      - name: Install the Debian archive keyring
+        run: |
+          if [ ! -f /usr/share/keyrings/debian-archive-keyring.gpg ]; then
+            sudo apt-get install -y -qq --no-install-recommends debian-archive-keyring > /dev/null 2>&1 \
+              || { sudo apt-get update -qq > /dev/null 2>&1 && sudo apt-get install -y -qq --no-install-recommends debian-archive-keyring > /dev/null 2>&1; } \
+              || echo "::warning::debian-archive-keyring could not be installed: system packages of Debian servers will not be checked"
+          fi
+
+      - name: Name the day
+        id: day
+        run: echo "day=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the references
+        id: refs
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ${{ env.WORK }}/cache
+            !${{ env.WORK }}/cache/builds
+          key: registry/${{ inputs.project }}/refs/${{ steps.day.outputs.day }}
+          restore-keys: registry/${{ inputs.project }}/refs/
+
+      - name: Restore the builds
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ env.WORK }}/cache/builds
+          key: registry/${{ inputs.project }}/builds/latest
+          restore-keys: registry/${{ inputs.project }}/builds/
+
+      - name: Audit
+        id: audit
+        env:
+          # Every key of verifier/auditstatus.pub (two while servers move
+          # from one to the other): ssh offers each in turn.
+          AUDITSTATUS_SSH_KEY: |
+            ${{ secrets.AUDITSTATUS_SSH_KEY_1 }}
+            ${{ secrets.AUDITSTATUS_SSH_KEY_2 }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          if [[ "$AUDITSTATUS_SSH_KEY" != *"PRIVATE KEY"* ]]; then
+            echo "::error::The verifier environment has no AUDITSTATUS_SSH_KEY_1 or AUDITSTATUS_SSH_KEY_2 secret: run the Verifier key workflow (verifier/README.md)"
+            exit 1
+          fi
+          node scripts/cli.js registry audit --project "$PROJECT" --work "$WORK" --github-output "$GITHUB_OUTPUT"
+          cat "$WORK/report/report.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the report
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: report-${{ inputs.project }}
+          path: ${{ env.WORK }}/report/
+          if-no-files-found: error
+          retention-days: 90
+
+      # Once a day: what this job downloaded and checked (repositories,
+      # package metadata, archives), for the next runs.
+      - name: Save the references
+        if: ${{ !cancelled() && steps.refs.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ${{ env.WORK }}/cache
+            !${{ env.WORK }}/cache/builds
+          key: registry/${{ inputs.project }}/refs/${{ steps.day.outputs.day }}
+
+  rebuild:
+    name: Build again (no key)
+    needs: audit
+    if: ${{ !cancelled() && needs.audit.outputs.retry-after != '' && needs.audit.outputs.retry-after != '0' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 210
+    permissions:
+      contents: read
+    steps:
+      - name: Wait for a deploy in progress
+        env:
+          DELAY: ${{ needs.audit.outputs.retry-after }}
+        run: |
+          if ! [[ "$DELAY" =~ ^[0-9]{1,4}$ ]] || [ "$DELAY" -gt 3600 ]; then
+            echo "::error::Not a delay: $DELAY"
+            exit 1
+          fi
+          sleep "$DELAY"
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        if: inputs.build
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/registry-setup
+        if: inputs.build
+        with:
+          node-version: ${{ inputs.node }}
+          build-user: auditstatus-build
+
+      - name: Install the build's packages
+        if: inputs.build && inputs.apt != ''
+        env:
+          APT: ${{ inputs.apt }}
+        run: |
+          read -ra packages <<< "$APT"
+          for package in "${packages[@]}"; do
+            if ! [[ "$package" =~ ^[a-z0-9][a-z0-9.+-]{1,63}$ ]]; then
+              echo "::error::Not an Ubuntu package name: $package"
+              exit 1
+            fi
+          done
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends "${packages[@]}"
+
+      - name: Restore the references
+        if: inputs.build
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ${{ env.WORK }}/cache
+            !${{ env.WORK }}/cache/builds
+          key: registry/${{ inputs.project }}/refs/latest
+          restore-keys: registry/${{ inputs.project }}/refs/
+
+      - name: Restore the builds
+        if: inputs.build
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ env.WORK }}/cache/builds
+          key: registry/${{ inputs.project }}/builds/latest
+          restore-keys: registry/${{ inputs.project }}/builds/
+
+      # The commits the servers ran at the first attempt.
+      - name: Download the first attempt's report
+        if: inputs.build
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: report-${{ inputs.project }}
+          path: ${{ runner.temp }}/first
+
+      - name: Build
+        if: inputs.build
+        run: node scripts/cli.js registry build --project "$PROJECT" --work "$WORK" --previous "$RUNNER_TEMP/first/report.json"
+
+      - name: Save the builds
+        if: ${{ always() && inputs.build && hashFiles(format('{0}/cache/builds/*.json', env.WORK)) != '' }}
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ env.WORK }}/cache/builds
+          key: registry/${{ inputs.project }}/builds/${{ hashFiles(format('{0}/cache/builds/*.json', env.WORK)) }}
+
+  again:
+    name: Audit again
+    needs: [audit, rebuild]
+    if: ${{ !cancelled() && needs.audit.outputs.retry-after != '' && needs.audit.outputs.retry-after != '0' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment: verifier
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/registry-setup
+        with:
+          node-version: ${{ inputs.node }}
+
+      - name: Install the Debian archive keyring
+        run: |
+          if [ ! -f /usr/share/keyrings/debian-archive-keyring.gpg ]; then
+            sudo apt-get install -y -qq --no-install-recommends debian-archive-keyring > /dev/null 2>&1 \
+              || { sudo apt-get update -qq > /dev/null 2>&1 && sudo apt-get install -y -qq --no-install-recommends debian-archive-keyring > /dev/null 2>&1; } \
+              || echo "::warning::debian-archive-keyring could not be installed: system packages of Debian servers will not be checked"
+          fi
+
+      - name: Restore the references
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ${{ env.WORK }}/cache
+            !${{ env.WORK }}/cache/builds
+          key: registry/${{ inputs.project }}/refs/latest
+          restore-keys: registry/${{ inputs.project }}/refs/
+
+      - name: Restore the builds
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ env.WORK }}/cache/builds
+          key: registry/${{ inputs.project }}/builds/latest
+          restore-keys: registry/${{ inputs.project }}/builds/
+
+      - name: Download the first attempt's report
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: report-${{ inputs.project }}
+          path: ${{ runner.temp }}/first
+
+      # The servers named collected again; the others keep their result.
+      - name: Audit again
+        env:
+          AUDITSTATUS_SSH_KEY: |
+            ${{ secrets.AUDITSTATUS_SSH_KEY_1 }}
+            ${{ secrets.AUDITSTATUS_SSH_KEY_2 }}
+          GITHUB_TOKEN: ${{ github.token }}
+          SERVERS: ${{ needs.audit.outputs.retry-servers }}
+        run: |
+          args=(registry audit --project "$PROJECT" --work "$WORK" --previous "$RUNNER_TEMP/first/report.json")
+          read -ra names <<< "$SERVERS"
+          for name in "${names[@]}"; do args+=(--server "$name"); done
+          node scripts/cli.js "${args[@]}"
+          cat "$WORK/report/report.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the report
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: report-${{ inputs.project }}
+          path: ${{ env.WORK }}/report/
+          if-no-files-found: error
+          retention-days: 90
+          overwrite: true

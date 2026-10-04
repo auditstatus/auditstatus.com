@@ -1,0 +1,7 @@
+# /etc/auditstatus/config.yml for Java and the JVM (Gradle, Maven; Spring Boot, jars).
+version: 2
+services:
+  - name: app
+    root: /srv/app/current
+    user: app
+    ecosystems: [maven]

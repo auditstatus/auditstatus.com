@@ -1,0 +1,33 @@
+# yaml-language-server: $schema=https://auditstatus.com/schema/registry.schema.json
+#
+# The simplest registry file: the git checkout in /srv/app on each server
+# must match a commit of the public main branch, file for file.
+#
+# On each server, /etc/auditstatus/config.yml names the same service:
+#
+#   version: 2
+#   services:
+#     - name: app
+#       root: /srv/app
+
+project:
+  name: Example
+  url: https://example.com
+  contact: security@example.com
+  github: example-maintainer
+
+repository:
+  url: https://github.com/example/app.git
+  branch: main
+
+services:
+  - name: app
+    root: /srv/app
+
+# Each server's host key, from /etc/ssh/ssh_host_ed25519_key.pub on the
+# server (a server without hostKeys is not contacted).
+servers:
+  - name: web1
+    host: web1.example.com
+    hostKeys:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl

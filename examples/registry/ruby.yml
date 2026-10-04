@@ -1,0 +1,39 @@
+# yaml-language-server: $schema=https://auditstatus.com/schema/registry.schema.json
+#
+# A Rails app with gems in vendor/bundle: the checkout against the latest
+# commit of main, each gem against Gemfile.lock and RubyGems.org, and the
+# Puma workers.
+#
+# On each server:
+#
+#   version: 2
+#   services:
+#     - name: rails
+#       root: /srv/rails/current
+#       user: rails
+#       ecosystems: [rubygems]
+
+project:
+  name: Example Store
+  url: https://store.example.com
+  contact: security@example.com
+
+repository:
+  url: https://github.com/example/store.git
+  branch: main
+  version: latest
+
+services:
+  - name: rails
+    root: /srv/rails/releases/current
+
+policy:
+  retryAfterSeconds: 600
+  versionGraceSeconds: 1800
+  # Gems with native extensions compiled on the server: a warning, the default.
+  builtPackages: warn
+
+servers:
+  - name: store
+    host: store.example.com
+    minProcesses: 2

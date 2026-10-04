@@ -1,0 +1,51 @@
+# yaml-language-server: $schema=https://auditstatus.com/schema/registry.schema.json
+#
+# Node.js under PM2, pinned to a release tag.  Besides the files and
+# node_modules, every worker process is checked: it runs from the deployed
+# checkout with the official Node.js binary, its executable memory matches
+# the binaries and libraries on disk, nothing is preloaded (LD_PRELOAD,
+# NODE_OPTIONS --require), and no inspector port is open.  The global npm,
+# corepack and pm2 next to the Node.js binary are compared with their
+# releases.
+#
+# On each server (the attester needs CAP_SYS_PTRACE to read the workers'
+# memory, set by the install steps):
+#
+#   version: 2
+#   services:
+#     - name: api
+#       root: /var/www/api/current
+#       user: deploy
+#       ecosystems: [npm]
+#   runtimes:
+#     node:
+#       globalPackages: [npm, corepack, pm2]
+
+project:
+  name: Example API
+  url: https://api.example.com
+  contact: security@example.com
+
+repository:
+  url: https://github.com/example/api.git
+  branch: main
+  # Servers run this release until the tag changes here.
+  version: v3.2.1
+
+services:
+  - name: api
+    root: /var/www/api/source
+
+policy:
+  # pnpm runs husky, which writes git hook shims (not application code).
+  allowUntracked:
+    - .husky/_/**
+
+servers:
+  - name: api-1
+    host: api-1.example.com
+    # PM2 runs four cluster workers and a proxy: fewer processes fail.
+    minProcesses: 5
+  - name: api-2
+    host: api-2.example.com
+    minProcesses: 5

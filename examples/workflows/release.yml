@@ -1,0 +1,54 @@
+# .github/workflows/release.yml for a service deployed without git (a Go or
+# Rust binary, a bundle): build, write the release manifest, and attest it.
+# The verifier checks the attestation's signer against `artifact.signer`.
+
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build
+        run: |
+          mkdir -p dist
+          CGO_ENABLED=0 go build -trimpath -o dist/api ./cmd/api
+          cp -R config dist/
+
+      # For Rust: cargo install cargo-auditable, then
+      #   cargo auditable build --release --locked && cp target/release/api dist/
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Write the release manifest
+        run: npx --yes auditstatus@2 manifest --dir dist
+
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/.attestium-manifest.json
+
+      - name: Package
+        run: tar -C dist -czf "api-${GITHUB_SHA}.tar.gz" .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: api-${{ github.sha }}
+          path: api-${{ github.sha }}.tar.gz

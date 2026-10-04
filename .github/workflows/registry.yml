@@ -1,0 +1,213 @@
+name: Registry
+
+# Verifies every project of the public registry (registry/<project>.yml)
+# each hour, from GitHub Actions, with Audit Status's own SSH key (the
+# AUDITSTATUS_SSH_KEY_1 and _2 secrets of the verifier environment, whose
+# public keys are verifier/auditstatus.pub), and publishes the reports to
+# the status branch: projects/<project>/report.json, report.md, badge.json
+# and report.sigstore.json, index.json and README.md.  See docs/registry.md.
+
+on:
+  schedule:
+    - cron: '23 * * * *'
+  workflow_dispatch:
+    inputs:
+      project:
+        description: 'One project: the name of its file in registry/, without .yml (empty: every project)'
+        type: string
+        default: ''
+
+permissions: {}
+
+# One run at a time: each publishes to the status branch.
+concurrency:
+  group: registry
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    name: Plan
+    # Forks have neither the key nor the status branch.
+    if: github.repository == 'auditstatus/auditstatus.com'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      projects: ${{ steps.plan.outputs.projects }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/registry-setup
+
+      - name: Plan
+        id: plan
+        env:
+          PROJECT: ${{ inputs.project }}
+        run: |
+          if [ ! -s verifier/auditstatus.pub ]; then
+            echo "::notice::The registry runs once verifier/auditstatus.pub exists: run the Verifier key workflow (verifier/README.md)."
+            echo 'projects=[]' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          args=(registry plan)
+          if [ -n "$PROJECT" ]; then args+=(--project "$PROJECT"); fi
+          node scripts/cli.js "${args[@]}" >> "$GITHUB_OUTPUT"
+
+  project:
+    name: ${{ matrix.project.slug }}
+    needs: plan
+    if: needs.plan.outputs.projects != '[]' && needs.plan.outputs.projects != ''
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        project: ${{ fromJSON(needs.plan.outputs.projects) }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/registry-project.yml
+    with:
+      project: ${{ matrix.project.slug }}
+      build: ${{ matrix.project.build }}
+      apt: ${{ matrix.project.apt }}
+      node: ${{ matrix.project.node }}
+
+  # Holds no SSH key and runs no code of a project.
+  publish:
+    name: Publish
+    needs: [plan, project]
+    if: ${{ !cancelled() && needs.plan.outputs.projects != '[]' && needs.plan.outputs.projects != '' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      # The status branch.
+      contents: write
+      # An issue for each project that is not passing.
+      issues: write
+      # The attestation of the files this run wrote.
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/registry-setup
+
+      - name: Download the reports
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: report-*
+          path: ${{ runner.temp }}/reports
+
+      # The token goes in a header from the environment, not in a URL or
+      # on a command line.
+      - name: Check out the status branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir "$RUNNER_TEMP/status"
+          cd "$RUNNER_TEMP/status"
+          git init -q
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="http.${GITHUB_SERVER_URL}/.extraheader"
+          GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
+          export GIT_CONFIG_VALUE_0
+          if git fetch -q --depth 1 "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" status 2> /dev/null; then
+            git checkout -q -B status FETCH_HEAD
+          else
+            git checkout -q --orphan status
+          fi
+
+      - name: Write the reports
+        id: publish
+        env:
+          PROJECTS: ${{ needs.plan.outputs.projects }}
+          # A run of every project also removes projects no longer in the registry.
+          ALL: ${{ github.event_name == 'schedule' || inputs.project == '' }}
+        run: |
+          args=(registry publish --status "$RUNNER_TEMP/status" --reports "$RUNNER_TEMP/reports" --projects "$PROJECTS" --subjects "$RUNNER_TEMP/subjects")
+          if [ "$ALL" = true ]; then args+=(--all); fi
+          node scripts/cli.js "${args[@]}" > "$RUNNER_TEMP/published.json"
+          {
+            echo 'subjects<<AUDITSTATUS_SUBJECTS_END'
+            cat "$RUNNER_TEMP/subjects"
+            echo 'AUDITSTATUS_SUBJECTS_END'
+          } >> "$GITHUB_OUTPUT"
+
+      # Anyone who can push to the status branch could edit it: the
+      # attestation, signed with this workflow's identity and recorded in a
+      # transparency log, shows that this run wrote the files
+      # (auditstatus verify-report, or gh attestation verify).
+      - name: Attest the files this run wrote
+        id: attest
+        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
+        with:
+          subject-path: ${{ steps.publish.outputs.subjects }}
+          show-summary: false
+
+      - name: Keep the attestation with the files
+        env:
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          # shellcheck disable=SC2016 # JavaScript
+          node -e '
+            const fs = require("node:fs");
+            const path = require("node:path");
+            const [bundle, status, published] = process.argv.slice(1);
+            for (const {slug} of JSON.parse(fs.readFileSync(published, "utf8"))) {
+              fs.copyFileSync(bundle, path.join(status, "projects", slug, "report.sigstore.json"));
+            }
+            fs.copyFileSync(bundle, path.join(status, "index.sigstore.json"));
+          ' "$BUNDLE" "$RUNNER_TEMP/status" "$RUNNER_TEMP/published.json"
+
+      - name: Push the status branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd "$RUNNER_TEMP/status"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="http.${GITHUB_SERVER_URL}/.extraheader"
+          GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
+          export GIT_CONFIG_VALUE_0
+          git add -A
+          git diff --cached --quiet || git commit -q -m "chore: registry results"
+          git push -q "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" HEAD:refs/heads/status
+
+      # "[<project>] Audit Status is not passing" is opened while a project
+      # fails or is inconclusive, mentioning its project.github, and closed
+      # when it passes.
+      - name: Open or close issues
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          open="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search 'in:title "Audit Status is not passing"' --limit 1000 --json number,title)"
+          # shellcheck disable=SC2016 # JavaScript template literals
+          OPEN="$open" node -e '
+            const fs = require("node:fs");
+            const {execFileSync} = require("node:child_process");
+            const repository = process.env.GITHUB_REPOSITORY;
+            const open = JSON.parse(process.env.OPEN);
+            const escape = text => String(text).replace(/[\\`*_{}[\]()#+\-.!|<>~]/g, "\\$&");
+            const words = {fail: "failing", error: "inconclusive"};
+            for (const project of JSON.parse(fs.readFileSync(process.argv[1], "utf8"))) {
+              const title = `[${project.slug}] Audit Status is not passing`;
+              const issue = open.find(item => item.title === title);
+              const passing = project.status === "pass" || project.status === "warn";
+              if (passing && issue) {
+                execFileSync("gh", ["issue", "close", String(issue.number), "--repo", repository, "--comment", "Passing again."], {stdio: "inherit"});
+              } else if (!passing && !issue) {
+                const body = [
+                  `The hourly audit of [${escape(project.name)}](${project.url}) is ${words[project.status] || "not passing"}: see [the report](${project.report}).`,
+                  ...(project.github ? ["", `cc @${project.github}`] : []),
+                  "",
+                  "This issue closes when the audit passes again.",
+                ].join("\n");
+                execFileSync("gh", ["issue", "create", "--repo", repository, "--title", title, "--body", body], {stdio: "inherit"});
+              }
+            }
+          ' "$RUNNER_TEMP/published.json"

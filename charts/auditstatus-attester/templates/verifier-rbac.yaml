@@ -1,0 +1,45 @@
+{{- if .Values.verifier.create }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Values.verifier.name }}
+  labels:
+    {{- include "attester.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ .Values.verifier.name }}
+  labels:
+    {{- include "attester.labels" . | nindent 4 }}
+rules:
+  # Find the attester pod on a node, and reach its loopback port.  Nothing
+  # else: the verifier cannot run commands in the pod.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  # Read the attester DaemonSet: only a pod it controls, running its pod
+  # template, answers for a node.
+  - apiGroups: ["apps"]
+    resources: ["daemonsets"]
+    resourceNames: [{{ include "attester.name" . | quote }}]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["pods/portforward"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ .Values.verifier.name }}
+  labels:
+    {{- include "attester.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ .Values.verifier.name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.verifier.name }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

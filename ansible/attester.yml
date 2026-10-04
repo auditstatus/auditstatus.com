@@ -1,0 +1,18 @@
+---
+# ansible-playbook -i inventory ansible/attester.yml
+- name: Install the Audit Status attester
+  hosts: all
+  become: true
+  roles:
+    - role: auditstatus_attester
+      vars:
+        auditstatus_sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+        auditstatus_verifier_keys:
+          - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample verifier
+        auditstatus_config:
+          version: 2
+          services:
+            - name: web
+              root: /var/www/app/current
+              user: deploy
+        auditstatus_tpm: true

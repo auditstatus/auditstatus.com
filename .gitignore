@@ -4,6 +4,8 @@
 *.log
 *.pem
 .DS_Store
+# The verifier's cache, and the registry's working directories.
+.cache
 .idea
 .nyc_output
 .vscode
@@ -17,3 +19,7 @@ yarn.lock
 Thumbs.db
 tmp
 temp
+sea-prep.blob
+/auditstatus-*
+SHA256SUMS
+/release

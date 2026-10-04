@@ -1,0 +1,37 @@
+# yaml-language-server: $schema=https://auditstatus.com/schema/registry.schema.json
+#
+# A Django app in a uv virtual environment, pinned to one commit: the
+# checkout, every package in .venv against uv.lock and PyPI, and the
+# gunicorn workers.
+#
+# On each server:
+#
+#   version: 2
+#   services:
+#     - name: blog
+#       root: /srv/blog
+#       user: blog
+#       ecosystems: [pypi]
+
+project:
+  name: Example Blog
+  url: https://blog.example.com
+  contact: security@example.com
+
+repository:
+  url: https://github.com/example/blog.git
+  branch: main
+  # A commit (all 40 characters), for a project that deploys seldom.
+  version: 0123456789abcdef0123456789abcdef01234567
+
+services:
+  - name: blog
+    root: /srv/blog
+
+policy:
+  # Python's bytecode caches are not verified: a warning, the default.
+  bytecode: warn
+
+servers:
+  - name: blog
+    host: blog.example.com

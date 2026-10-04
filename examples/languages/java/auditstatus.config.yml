@@ -1,0 +1,15 @@
+# Verifier configuration for Java and the JVM (Gradle, Maven; Spring Boot, jars).
+version: 2
+services:
+  - name: app
+    repository:
+      url: https://github.com/example/app.git
+      branch: main
+    # The application jar itself is built by CI: attest its manifest, or
+    # rebuild it here:
+    # build:
+    #   command: ./gradlew --no-daemon bootJar
+    #   outputs: [build/libs/*.jar]
+servers:
+  - name: app1
+    host: app1.example.com

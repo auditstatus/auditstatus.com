@@ -1,0 +1,58 @@
+name: Registry setup
+description: Node.js and the verifier's production dependencies (frozen lockfile, no install scripts), for the registry's jobs.
+
+inputs:
+  node-version:
+    description: Node.js version (the project's setup.node; the same in every job of a project, as the build cache key includes PATH).
+    default: '22'
+  build-user:
+    description: 'Create this unprivileged account for builds (without a password, sudo, other groups, cron or at jobs). Empty: none.'
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    # pnpm by the registry's integrity for this version, as the lockfile
+    # pins the verifier's dependencies: the audit jobs hold the SSH key.
+    - name: Install the verifier
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        PNPM_URL: https://registry.npmjs.org/pnpm/-/pnpm-9.15.9.tgz
+        PNPM_INTEGRITY: sha512-aARhQYk8ZvrQHAeSMRKOmvuJ74fiaR1p5NQO7iKJiClf1GghgbrlW1hBjDolO95lpQXsfF+UA+zlzDzTfc8lMQ==
+      run: |
+        tarball="$(mktemp -d)/pnpm.tgz"
+        curl -fsSL --retry 3 -o "$tarball" "$PNPM_URL"
+        actual="sha512-$(node -e 'process.stdout.write(require("node:crypto").createHash("sha512").update(require("node:fs").readFileSync(process.argv[1])).digest("base64"))' "$tarball")"
+        if [ "$actual" != "$PNPM_INTEGRITY" ]; then
+          echo "::error::pnpm from $PNPM_URL does not match its pinned integrity"
+          exit 1
+        fi
+        npm install -g "$tarball" > /dev/null
+        pnpm install --prod --frozen-lockfile --ignore-scripts
+
+    # Builds run the project's scripts: as an account of their own, they
+    # cannot read the runner user's processes and files or write the cache.
+    - name: Create the build account
+      if: inputs.build-user != ''
+      shell: bash
+      env:
+        BUILD_USER: ${{ inputs.build-user }}
+      run: |
+        if ! id -u "$BUILD_USER" > /dev/null 2>&1; then
+          sudo useradd --system --user-group --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin "$BUILD_USER"
+        fi
+        if [ "$(id -u "$BUILD_USER")" = 0 ] || [ "$(id -G "$BUILD_USER")" != "$(id -g "$BUILD_USER")" ] \
+          || sudo -n -l -U "$BUILD_USER" 2> /dev/null | grep -q 'may run the following'; then
+          echo "::error::$BUILD_USER must be an unprivileged account without sudo or other groups"
+          exit 1
+        fi
+        for file in /etc/cron.deny /etc/at.deny; do
+          if ! sudo grep -qxF -- "$BUILD_USER" "$file" 2>/dev/null; then
+            echo "$BUILD_USER" | sudo tee -a "$file" > /dev/null
+          fi
+        done

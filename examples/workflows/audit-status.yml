@@ -1,0 +1,75 @@
+# .github/workflows/audit-status.yml in the repository that publishes the
+# results (for example a status page).  It needs:
+#
+#   auditstatus.config.yml    verifier configuration
+#   known_hosts               pinned SSH host keys of the audited servers
+#   AUDITSTATUS_SSH_KEY       secret: private key allowed by the forced command
+#
+# Pin the action to a full commit SHA of a release.
+
+name: Audit Status
+
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: audit-status
+  cancel-in-progress: false
+
+jobs:
+  # A configured build runs the audited repository's build scripts here, so
+  # this job's token is read-only; the report goes to the publish job.
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      attestations: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: auditstatus/auditstatus.com@v2
+        with:
+          config: auditstatus.config.yml
+          ssh-key: ${{ secrets.AUDITSTATUS_SSH_KEY }}
+          publish-branch: ''
+          issue: 'false'
+          fail-on: never
+          # The publish job attests the report it publishes.
+          attest-report: 'false'
+          # The Node.js version any configured build runs with; match the servers.
+          node-version: '22'
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: audit-status
+          path: audit-status/
+
+  # Publishes the report and opens or closes the issue; runs no code from
+  # the audited repository and holds no SSH key.
+  publish:
+    needs: verify
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      issues: write
+      # Sign the report with this workflow's identity (attest-report).
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: audit-status
+          path: audit-status
+
+      - uses: auditstatus/auditstatus.com@v2
+        with:
+          verify: 'false'
+          publish-branch: audit-status

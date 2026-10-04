@@ -1,0 +1,33 @@
+# yaml-language-server: $schema=https://auditstatus.com/schema/registry.schema.json
+#
+# Docker containers: each running container's files against its image,
+# fetched by registry digest, the image's build provenance, and the code
+# its processes run.
+#
+# On each server (the attester reads the Docker socket):
+#
+#   version: 2
+#   services:
+#     - name: web
+#       container:
+#         image: ghcr.io/example/web
+#   containers:
+#     dockerSocket: /var/run/docker.sock
+
+project:
+  name: Example Web
+  url: https://web.example.com
+  contact: security@example.com
+
+services:
+  - name: web
+    image:
+      repository: ghcr.io/example/web
+      # The image was built and attested by this workflow.
+      signer:
+        repository: example/web
+        workflow: .github/workflows/image.yml
+
+servers:
+  - name: docker-1
+    host: docker-1.example.com

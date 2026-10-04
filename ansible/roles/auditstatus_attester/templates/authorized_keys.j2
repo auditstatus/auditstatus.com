@@ -1,0 +1,10 @@
+# Managed by Ansible.  These keys can only run the attester.
+{% for key in auditstatus_verifier_keys %}
+{#- One key per line and no options of its own: a second line (a multi-line
+    string, a file of several keys) would be a key without the forced
+    command. #}
+{% if key is not string or key is search('[\r\n]') or key is not match('^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521)|sk-ssh-ed25519@openssh\.com|sk-ecdsa-sha2-nistp256@openssh\.com) [A-Za-z0-9+/]+={0,3}( [^\r\n]*)?$') %}
+{{ undef(hint='auditstatus_verifier_keys: each entry must be one public key, "<type> <base64> [comment]", on one line and without options') }}
+{% endif %}
+command="{{ auditstatus_bin }} ssh",restrict {{ key }}
+{% endfor %}

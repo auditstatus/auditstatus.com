@@ -1,0 +1,15 @@
+# Actions and the image's base are pinned by digest; Dependabot keeps the
+# pins current.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    # The workflows, action.yml at the root, and the registry's setup action.
+    directories:
+      - /
+      - /.github/actions/registry-setup
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly

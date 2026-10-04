@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="t"><title id="t">Audit Status</title>
+  <style>.as-tile{fill:var(--auditstatus-tile, #1D3536);stroke:var(--auditstatus-line, #7FB5A8)}.as-glyph{fill:var(--auditstatus-glyph, #FCF0DE)}.as-glyph-line{fill:none;stroke:var(--auditstatus-glyph, #FCF0DE)}.as-accent{fill:var(--auditstatus-accent, #F2B988)}.as-soft{fill:none;stroke:var(--auditstatus-soft, #8CC7BA)}</style>
+  <rect class="as-tile" x="4" y="4" width="120" height="120" rx="14" stroke-width="8"/>
+  <path class="as-soft" d="M34 44h30" stroke-width="12" stroke-linecap="round"/>
+  <path class="as-glyph-line" d="m34 76 17 17 43-47" stroke-width="15" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

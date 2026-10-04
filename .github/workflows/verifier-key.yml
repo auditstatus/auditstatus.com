@@ -1,0 +1,137 @@
+name: Verifier key
+
+# Generates one of Audit Status's SSH keys, the keys the registry's servers
+# allow (verifier/auditstatus.pub), on a GitHub-hosted runner:
+#
+#   - the private key is stored only as the AUDITSTATUS_SSH_KEY_<n> secret
+#     of the verifier environment: GitHub never shows a secret's value, the
+#     runner is discarded after the job, and nothing prints the key
+#   - the public key is verifier/auditstatus-<n>.pub, with an attestation
+#     (auditstatus-<n>.pub.sigstore.json) that this workflow generated it;
+#     verifier/auditstatus.pub lists every key.  They are pushed to the
+#     branch verifier-key/<run>, published by a pull request from it
+#
+# Needs the KEY_ADMIN_TOKEN secret of the verifier-key environment: a
+# fine-grained personal access token for this repository with the
+# "Environments" permission (read and write), which can write the
+# verifier environment's secrets but never read them.  Delete it after the
+# run.  See verifier/README.md.
+
+on:
+  workflow_dispatch:
+    inputs:
+      key:
+        description: 'The key to generate: 1 or 2 (two keys let servers move from one to the other)'
+        required: true
+        type: choice
+        options: ['1', '2']
+      confirm:
+        description: 'Type "replace key" to confirm: the key replaces the one in that place now'
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: verifier-key
+  cancel-in-progress: false
+
+jobs:
+  generate:
+    name: Generate key ${{ inputs.key }}
+    if: github.repository == 'auditstatus/auditstatus.com' && github.ref == 'refs/heads/main' && inputs.confirm == 'replace key'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: verifier-key
+    permissions:
+      # The branch with the public key.
+      contents: write
+      # The attestation of the public key.
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Generate the key and store it as a secret
+        env:
+          GH_TOKEN: ${{ secrets.KEY_ADMIN_TOKEN }}
+          KEY: ${{ inputs.key }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::The verifier-key environment needs the KEY_ADMIN_TOKEN secret (verifier/README.md)"
+            exit 1
+          fi
+          umask 077
+          dir="$(mktemp -d)"
+          trap 'shred -u "$dir/key" 2> /dev/null; rm -rf -- "$dir"' EXIT
+          ssh-keygen -q -t ed25519 -N '' -C "auditstatus-verifier-key-$KEY" -f "$dir/key"
+          gh secret set "AUDITSTATUS_SSH_KEY_$KEY" --repo "$GITHUB_REPOSITORY" --env verifier < "$dir/key"
+          cp "$dir/key.pub" "$RUNNER_TEMP/key.pub"
+
+      # verifier/auditstatus-<n>.pub, then verifier/auditstatus.pub (every
+      # key, what servers allow) and the table in verifier/README.md from
+      # the keys there.
+      - name: Write the public key
+        env:
+          KEY: ${{ inputs.key }}
+        run: |
+          cp "$RUNNER_TEMP/key.pub" "verifier/auditstatus-$KEY.pub"
+          # shellcheck disable=SC2016 # JavaScript template literals
+          node -e '
+            const fs = require("node:fs");
+            const {execFileSync} = require("node:child_process");
+            const keys = ["1", "2"]
+              .filter(number => fs.existsSync(`verifier/auditstatus-${number}.pub`))
+              .map(number => ({number, line: fs.readFileSync(`verifier/auditstatus-${number}.pub`, "utf8").trim()}));
+            fs.writeFileSync("verifier/auditstatus.pub", keys.map(key => `${key.line}\n`).join(""));
+            const rows = keys.map(({number, line}) => {
+              const fingerprint = execFileSync("ssh-keygen", ["-lf", "-"], {input: `${line}\n`, encoding: "utf8"}).split(" ")[1];
+              return `| ${number} | \`${fingerprint}\` | [auditstatus-${number}.pub](auditstatus-${number}.pub), [attestation](auditstatus-${number}.pub.sigstore.json) |`;
+            });
+            const readme = fs.readFileSync("verifier/README.md", "utf8");
+            const start = readme.indexOf("<!-- keys:start -->") + "<!-- keys:start -->".length;
+            const end = readme.indexOf("<!-- keys:end -->");
+            const table = ["| Key | Fingerprint | Files |", "| --- | --- | --- |", ...rows].join("\n");
+            fs.writeFileSync("verifier/README.md", `${readme.slice(0, start)}\n\n${table}\n\n${readme.slice(end)}`);
+          '
+
+      - name: Attest the public key
+        id: attest
+        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
+        with:
+          subject-path: verifier/auditstatus-${{ inputs.key }}.pub
+          show-summary: false
+
+      - name: Push the public key to a branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KEY: ${{ inputs.key }}
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          cp "$BUNDLE" "verifier/auditstatus-$KEY.pub.sigstore.json"
+          branch="verifier-key/$GITHUB_RUN_ID"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -q -b "$branch"
+          git add verifier/
+          git commit -q -m "feat: Audit Status verifier key $KEY"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="http.${GITHUB_SERVER_URL}/.extraheader"
+          GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
+          export GIT_CONFIG_VALUE_0
+          git push -q "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" "HEAD:refs/heads/$branch"
+          {
+            echo "## Audit Status verifier key $KEY"
+            echo
+            echo "The private key is the AUDITSTATUS_SSH_KEY_$KEY secret of the verifier environment. Its public key:"
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/key.pub"
+            echo '```'
+            echo
+            echo "Fingerprint: \`$(ssh-keygen -lf "$RUNNER_TEMP/key.pub" | cut -d ' ' -f 2)\`"
+            echo
+            echo "Publish it with a pull request from [$branch](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/compare/main...$branch), then delete the KEY_ADMIN_TOKEN secret and the token."
+          } >> "$GITHUB_STEP_SUMMARY"

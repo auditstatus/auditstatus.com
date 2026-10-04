@@ -1,0 +1,175 @@
+{
+  "type": "auditstatus-report",
+  "version": 2,
+  "generatedAt": "2026-01-01T12:00:00.000Z",
+  "verifier": {
+    "version": "2.0.0"
+  },
+  "services": [
+    {
+      "name": "app",
+      "repository": {
+        "url": "https://github.com/example/app.git",
+        "branch": "main",
+        "webUrl": null
+      },
+      "artifact": null,
+      "image": null
+    }
+  ],
+  "status": "fail",
+  "servers": [
+    {
+      "name": "web1",
+      "host": "web1.example.com",
+      "status": "fail",
+      "level": "software",
+      "hardware": [],
+      "findings": [
+        {
+          "severity": "info",
+          "check": "attester",
+          "message": "Attester binary matches the published release 2.0.0"
+        },
+        {
+          "severity": "fail",
+          "check": "source",
+          "message": "Files differ from the public commit",
+          "service": "app",
+          "detail": {
+            "items": [
+              "index.js"
+            ],
+            "total": 1
+          }
+        },
+        {
+          "severity": "info",
+          "check": "source",
+          "message": "2 file(s) ignored by the commit were not compared",
+          "service": "app",
+          "detail": {
+            "items": [
+              ".env (1)",
+              "build/ (1)"
+            ],
+            "total": 2
+          }
+        },
+        {
+          "severity": "info",
+          "check": "packages:npm",
+          "message": "All 3 installed packages in node_modules match their references",
+          "service": "app",
+          "detail": {
+            "total": 3,
+            "verified": 2,
+            "bundled": 0,
+            "patched": 1,
+            "built": 0,
+            "failed": 0,
+            "unverifiable": 0,
+            "error": 0
+          }
+        },
+        {
+          "severity": "info",
+          "check": "processes",
+          "message": "The service's user also runs these programs outside the service directory (not inspected)",
+          "service": "app",
+          "detail": {
+            "items": [
+              "pid 812 PM2 v5.4.2: God Daemon (/usr/bin/node) in /home/deploy"
+            ],
+            "total": 1
+          }
+        },
+        {
+          "severity": "info",
+          "check": "globalPackages",
+          "message": "All 2 global packages match their references",
+          "detail": {
+            "total": 2,
+            "verified": 2,
+            "bundled": 0,
+            "patched": 0,
+            "built": 0,
+            "failed": 0,
+            "unverifiable": 0,
+            "error": 0
+          }
+        },
+        {
+          "severity": "info",
+          "check": "code",
+          "message": "3 of 3 executables and libraries match a reference (node 1, pinned 2)"
+        }
+      ],
+      "summary": {
+        "processes": 1,
+        "globalPackages": {
+          "total": 2,
+          "verified": 2,
+          "bundled": 0,
+          "patched": 0,
+          "built": 0,
+          "failed": 0,
+          "unverifiable": 0,
+          "error": 0
+        },
+        "code": {
+          "executables": 1,
+          "libraries": 2,
+          "explained": {
+            "pinned": 2,
+            "node": 1
+          },
+          "differing": 0,
+          "unexplained": 0,
+          "unchecked": 0
+        }
+      },
+      "services": [
+        {
+          "name": "app",
+          "kind": "directory",
+          "root": "/srv/app",
+          "commit": "d783b3269c91870e97ebadcfb697609c9803235a",
+          "commitDate": "2026-01-01T11:00:00Z",
+          "commitSubject": "initial",
+          "files": {
+            "tracked": 7,
+            "verified": 6,
+            "modified": 1,
+            "missing": 0,
+            "untracked": 0,
+            "ignored": 2
+          },
+          "packages": {
+            "npm:node_modules": {
+              "total": 3,
+              "verified": 2,
+              "bundled": 0,
+              "patched": 1,
+              "built": 0,
+              "failed": 0,
+              "unverifiable": 0,
+              "error": 0
+            }
+          },
+          "processes": 1,
+          "runtimes": {
+            "Node.js": 1
+          }
+        }
+      ],
+      "collectedAt": "2026-01-01T12:00:00.000Z",
+      "attesterVersion": "2.0.0",
+      "os": {
+        "id": "ubuntu",
+        "versionId": "24.04",
+        "codename": "noble"
+      }
+    }
+  ]
+}

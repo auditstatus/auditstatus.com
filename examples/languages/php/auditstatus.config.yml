@@ -1,0 +1,10 @@
+# Verifier configuration for PHP (Composer; PHP-FPM, Laravel, Symfony).
+version: 2
+services:
+  - name: app
+    repository:
+      url: https://github.com/example/app.git
+      branch: main
+servers:
+  - name: app1
+    host: app1.example.com

@@ -1,0 +1,28 @@
+---
+# Release to install, and the SHA-256 of its binary for this machine's
+# architecture (from the release's SHA256SUMS).
+auditstatus_version: "2.0.0"
+auditstatus_sha256: ""
+auditstatus_arch: "{{ 'arm64' if ansible_architecture in ['aarch64', 'arm64'] else 'x64' }}"
+auditstatus_url: "https://github.com/auditstatus/auditstatus.com/releases/download/v{{ auditstatus_version }}/auditstatus-linux-{{ auditstatus_arch }}"
+auditstatus_bin: /usr/local/bin/auditstatus
+
+# The account the verifier connects as.  Its key can only run the attester
+# (a forced command).
+auditstatus_user: auditstatus
+auditstatus_verifier_keys: []
+
+# Read other users' processes and files without running as root.
+auditstatus_capabilities: true
+
+# /etc/auditstatus/config.yml (see examples/attester.yml).
+auditstatus_config:
+  version: 2
+  services: []
+
+# The TPM's device is usually owned by this group.
+auditstatus_tpm_group: tss
+auditstatus_tpm: false
+
+# Record every program and library loaded (bpftrace), for the next audit.
+auditstatus_monitor: false

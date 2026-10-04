@@ -1,0 +1,7 @@
+# /etc/auditstatus/config.yml for PHP (Composer; PHP-FPM, Laravel, Symfony).
+version: 2
+services:
+  - name: app
+    root: /var/www/app/current
+    user: www-data
+    ecosystems: [composer]

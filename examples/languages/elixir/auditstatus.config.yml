@@ -1,0 +1,12 @@
+# Verifier configuration for Elixir and Erlang (Mix, releases).
+version: 2
+services:
+  - name: app
+    repository:
+      url: https://github.com/example/app.git
+      branch: main
+    # A release built by CI (`mix release`) instead of a checkout: attest
+    # its manifest (see ../binary-release).
+servers:
+  - name: app1
+    host: app1.example.com

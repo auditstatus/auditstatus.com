@@ -1,0 +1,13 @@
+config:
+  version: 2
+  services:
+    - name: web
+      container:
+        label: app.kubernetes.io/name=web
+    - name: worker
+      container:
+        image: ghcr.io/example/worker
+  containers:
+    crictl: /usr/local/bin/crictl
+  distro:
+    root: /proc/1/root

@@ -1,0 +1,110 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "attester.name" . }}
+  labels:
+    {{- include "attester.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "attester.selector" . | nindent 6 }}
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        {{- include "attester.labels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+    spec:
+      # The attester inspects every process on the node.
+      hostPID: true
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . | quote }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: attester
+          image: {{ include "attester.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy | quote }}
+          args: ["serve", "--config", "/etc/auditstatus/config.yml", "--listen", {{ printf "127.0.0.1:%d" (include "attester.port" . | int) | quote }}]
+          env:
+            - name: CONTAINER_RUNTIME_ENDPOINT
+              value: {{ printf "unix://%s" .Values.cri.socket | quote }}
+            - name: IMAGE_SERVICE_ENDPOINT
+              value: {{ printf "unix://%s" .Values.cri.socket | quote }}
+          securityContext:
+            runAsUser: 0
+            readOnlyRootFilesystem: true
+            {{- if and .Values.tpm.enabled .Values.tpm.privileged }}
+            privileged: true
+            {{- else }}
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+              # Read other processes' memory maps, executables and files.
+              add: ["SYS_PTRACE", "DAC_READ_SEARCH"]
+            {{- end }}
+            appArmorProfile:
+              type: {{ .Values.appArmorProfile | quote }}
+            seccompProfile:
+              type: RuntimeDefault
+          livenessProbe:
+            exec:
+              command: ["auditstatus", "version"]
+            periodSeconds: 60
+          {{- $resources := deepCopy .Values.resources }}
+          {{- if and .Values.tpm.enabled .Values.tpm.resourceName }}
+          {{- $_ := set $resources "limits" (merge (dict .Values.tpm.resourceName "1") (default (dict) $resources.limits)) }}
+          {{- end }}
+          resources:
+            {{- toYaml $resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/auditstatus
+              readOnly: true
+            - name: cri
+              mountPath: {{ .Values.cri.socket | quote }}
+            - name: tmp
+              mountPath: /tmp
+            {{- if .Values.ima.enabled }}
+            - name: securityfs
+              mountPath: /sys/kernel/security
+              readOnly: true
+            {{- end }}
+            {{- if and .Values.tpm.enabled (not .Values.tpm.resourceName) }}
+            - name: tpm
+              mountPath: /dev/tpmrm0
+            {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "attester.name" . }}
+            defaultMode: 0644
+        - name: cri
+          hostPath:
+            path: {{ .Values.cri.socket | quote }}
+            type: Socket
+        - name: tmp
+          emptyDir: {}
+        {{- if .Values.ima.enabled }}
+        - name: securityfs
+          hostPath:
+            path: /sys/kernel/security
+            type: Directory
+        {{- end }}
+        {{- if and .Values.tpm.enabled (not .Values.tpm.resourceName) }}
+        - name: tpm
+          hostPath:
+            path: /dev/tpmrm0
+            type: CharDevice
+        {{- end }}

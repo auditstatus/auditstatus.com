@@ -5,126 +5,135 @@ on:
     types: [published]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  build-binaries:
+  build:
     name: Build ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         include:
           - name: linux-x64
-            os: ubuntu-latest
-            platform: linux
-            arch: x64
-          - name: darwin-x64
-            os: macos-13
-            platform: darwin
-            arch: x64
+            os: ubuntu-24.04
+          - name: linux-arm64
+            os: ubuntu-24.04-arm
           - name: darwin-arm64
             os: macos-14
-            platform: darwin
-            arch: arm64
-          - name: win-x64
-            os: windows-latest
-            platform: win
-            arch: x64
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      # The binary embeds this official Node.js release.
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
 
-      - name: Install pnpm
-        run: npm install -g pnpm
+      - run: npm install -g pnpm@9
 
-      - name: Install dependencies
-        run: pnpm install
+      - run: pnpm install --frozen-lockfile
 
-      - name: Bundle CLI with esbuild
-        run: node scripts/build-sea.mjs
+      - name: Check the tag matches package.json
+        run: test "v$(node -p 'require("./package.json").version')" = "${GITHUB_REF_NAME}"
 
-      - name: Generate SEA blob
-        run: node --experimental-sea-config sea-config.json
+      - run: bash scripts/build-binary.sh
 
-      # Linux build
-      - name: Build binary (Linux)
-        if: matrix.platform == 'linux'
-        run: |
-          BINARY_NAME="auditstatus-linux-x64"
-          cp "$(which node)" "$BINARY_NAME"
-          npx postject "$BINARY_NAME" NODE_SEA_BLOB sea-prep.blob \
-            --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2
-          chmod +x "$BINARY_NAME"
-          ./"$BINARY_NAME" version
-
-      # macOS build
-      - name: Build binary (macOS)
-        if: matrix.platform == 'darwin'
-        run: |
-          BINARY_NAME="auditstatus-darwin-${{ matrix.arch }}"
-          cp "$(which node)" "$BINARY_NAME"
-          codesign --remove-signature "$BINARY_NAME"
-          npx postject "$BINARY_NAME" NODE_SEA_BLOB sea-prep.blob \
-            --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2 \
-            --macho-segment-name NODE_SEA
-          codesign --sign - "$BINARY_NAME"
-          chmod +x "$BINARY_NAME"
-          ./"$BINARY_NAME" version
-
-      # Windows build
-      - name: Build binary (Windows)
-        if: matrix.platform == 'win'
-        shell: pwsh
-        run: |
-          $nodePath = (Get-Command node).Source
-          Copy-Item $nodePath "auditstatus-win-x64.exe"
-          npx postject "auditstatus-win-x64.exe" NODE_SEA_BLOB sea-prep.blob `
-            --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2
-          .\auditstatus-win-x64.exe version
-
-      # Verify binary
-      - name: Verify binary (Unix)
-        if: matrix.platform != 'win'
-        run: |
-          BINARY_NAME="auditstatus-${{ matrix.platform }}-${{ matrix.arch }}"
-          ./"$BINARY_NAME" version
-          ./"$BINARY_NAME" --help
-
-      - name: Verify binary (Windows)
-        if: matrix.platform == 'win'
-        shell: pwsh
-        run: |
-          .\auditstatus-win-x64.exe version
-          .\auditstatus-win-x64.exe --help
-
-      # Upload to release
-      - name: Upload binary to release (Unix)
-        if: matrix.platform != 'win'
-        uses: softprops/action-gh-release@v2
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          files: auditstatus-${{ matrix.platform }}-${{ matrix.arch }}
+          name: auditstatus-${{ matrix.name }}
+          path: auditstatus-${{ matrix.name }}
+          if-no-files-found: error
 
-      - name: Upload binary to release (Windows)
-        if: matrix.platform == 'win'
-        uses: softprops/action-gh-release@v2
-        with:
-          files: auditstatus-win-x64.exe
-
-  upload-installer:
-    name: Upload install script
-    runs-on: ubuntu-latest
+  publish:
+    name: Publish binaries, checksums and provenance
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Upload install.sh
-        uses: softprops/action-gh-release@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          files: scripts/install.sh
+          persist-credentials: false
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: auditstatus-*
+          merge-multiple: true
+          path: release
+
+      - name: Checksums
+        working-directory: release
+        run: |
+          cp ../scripts/install.sh .
+          sha256sum auditstatus-* install.sh > SHA256SUMS
+          cat SHA256SUMS
+
+      # Verifiers match the attester's own binary against SHA256SUMS; the
+      # provenance ties each file to this workflow run and commit.
+      - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-path: |
+            release/auditstatus-*
+            release/install.sh
+
+      - name: Upload to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${GITHUB_REF_NAME}" release/* --clobber --repo "${GITHUB_REPOSITORY}"
+
+  image:
+    name: Attester container image
+    needs: publish
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      # The image holds the same binaries as the release, so a verifier can
+      # match the attester inside it with SHA256SUMS.
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: auditstatus-linux-*
+          merge-multiple: true
+          path: release
+
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Image name
+        id: name
+        run: echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/attester" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        id: build
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          provenance: false
+          tags: |
+            ${{ steps.name.outputs.image }}:${{ github.ref_name }}
+            ${{ steps.name.outputs.image }}:latest
+
+      # Verifiers check the image's signer the same way they check the
+      # images of audited services.
+      - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-name: ${{ steps.name.outputs.image }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true

@@ -1,0 +1,62 @@
+# yaml-language-server: $schema=https://auditstatus.com/schema/registry.schema.json
+#
+# A Node.js app built with pnpm.  Each server must run the latest GitHub
+# release: its tracked files, node_modules as pnpm-lock.yaml pins it (each
+# package against its npm tarball, with its build provenance), the build
+# output against a build of the same commit, and the official Node.js
+# release.
+#
+# On each server:
+#
+#   version: 2
+#   services:
+#     - name: shop
+#       root: /srv/shop/current
+#       user: shop
+#       ecosystems: [npm]
+
+project:
+  name: Example Shop
+  url: https://shop.example.com
+  contact: security@shop.example.com
+  github: example-maintainer
+
+setup:
+  # The servers' Node.js version: a build with another can differ.
+  node: '22.11.0'
+
+repository:
+  url: https://github.com/example/shop.git
+  branch: main
+  version: latest-release
+
+services:
+  - name: shop
+    # The real path of /srv/shop/current.
+    root: /srv/shop/releases/current
+
+references:
+  npmProvenance: true
+
+# The build the deploy runs, repeated by the registry in a clean checkout
+# of the release.  It runs as an unprivileged account with a new HOME.
+build:
+  command: |
+    npm install --prefix "$HOME/tools" --no-audit --no-fund --loglevel=error pnpm@9
+    "$HOME/tools/node_modules/.bin/pnpm" install --frozen-lockfile
+    "$HOME/tools/node_modules/.bin/pnpm" run build
+  outputs:
+    - dist/**
+  timeoutSeconds: 1200
+
+policy:
+  # A deploy in progress: collected again after ten minutes, and a server
+  # still on the previous release warns for the first hour.
+  retryAfterSeconds: 600
+  versionGraceSeconds: 3600
+
+servers:
+  - name: shop-1
+    host: shop-1.example.com
+  - name: shop-2
+    host: shop-2.example.com

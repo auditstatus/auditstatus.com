@@ -1,0 +1,7 @@
+# /etc/auditstatus/config.yml for Node.js (npm, pnpm, Yarn; PM2 or systemd).
+version: 2
+services:
+  - name: app
+    root: /srv/app/current
+    user: app
+    ecosystems: [npm]

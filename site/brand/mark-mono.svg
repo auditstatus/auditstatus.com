@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="t"><title id="t">Audit Status</title>
+  <style>.as-tile{fill:none;stroke:currentColor}.as-glyph{fill:currentColor}.as-glyph-line{fill:none;stroke:currentColor}.as-word{fill:currentColor}.as-accent{fill:currentColor}.as-soft{fill:none;stroke:currentColor}</style>
+  <rect class="as-tile" x="4" y="4" width="120" height="120" rx="10" stroke-width="4"/>
+  <circle class="as-accent" cx="102" cy="26" r="7"/>
+  <path class="as-soft" d="M24 42h44M24 58h28" stroke-width="7" stroke-linecap="round"/>
+  <path class="as-glyph-line" d="m30 82 16 16 50-52" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

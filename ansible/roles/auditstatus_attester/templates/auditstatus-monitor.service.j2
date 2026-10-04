@@ -1,0 +1,53 @@
+# Records every program and library loaded on this machine (eBPF, through
+# bpftrace), so the next audit can check what ran since the last one.
+# Enable `monitor` in /etc/auditstatus/config.yml to include it in evidence.
+
+[Unit]
+Description=Audit Status monitor
+Documentation=https://github.com/auditstatus/auditstatus.com
+After=local-fs.target
+
+[Service]
+Type=simple
+ExecStart={{ auditstatus_bin }} monitor --config /etc/auditstatus/config.yml
+Restart=always
+RestartSec=5
+# bpftrace needs root (CAP_BPF, CAP_PERFMON, CAP_SYS_ADMIN on older kernels;
+# CAP_SYS_RESOURCE and CAP_SYSLOG for its memory limit and kernel symbols).
+# The attester binary carries file capabilities (CAP_SYS_PTRACE,
+# CAP_DAC_READ_SEARCH): a bounding set without them would make its exec
+# fail, so they stay.  Everything else the kernel offers root is dropped.
+User=root
+CapabilityBoundingSet=CAP_BPF CAP_PERFMON CAP_SYS_ADMIN CAP_SYS_RESOURCE CAP_SYSLOG CAP_SYS_PTRACE CAP_DAC_READ_SEARCH
+LimitMEMLOCK=infinity
+NoNewPrivileges=true
+LogsDirectory=auditstatus
+LogsDirectoryMode=0750
+UMask=0077
+ProtectSystem=strict
+ReadWritePaths=/var/log/auditstatus
+ProtectHome=read-only
+PrivateTmp=true
+PrivateDevices=true
+# Tracing needs no network.
+PrivateNetwork=true
+IPAddressDeny=any
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+SystemCallArchitectures=native
+SystemCallFilter=~@clock @cpu-emulation @module @mount @obsolete @raw-io @reboot @swap
+SystemCallErrorNumber=EPERM
+# Not set: ProtectKernelTunables (older kernels create probes through
+# tracefs under /sys) and MemoryDenyWriteExecute (Node.js and bpftrace
+# compile code at run time).
+
+[Install]
+WantedBy=multi-user.target

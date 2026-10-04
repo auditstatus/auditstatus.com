@@ -1,0 +1,14 @@
+# Verifier configuration for Rust (Cargo).
+version: 2
+services:
+  - name: app
+    repository:
+      url: https://github.com/example/api.git
+      branch: main
+    artifact:
+      signer:
+        repository: example/api
+        workflow: .github/workflows/release.yml
+servers:
+  - name: app1
+    host: app1.example.com

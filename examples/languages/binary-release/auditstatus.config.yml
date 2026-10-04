@@ -1,0 +1,22 @@
+# Verifier configuration for Any compiled program (C, C++, Zig, Swift, Haskell, ...).
+version: 2
+services:
+  - name: app
+    repository:
+      url: https://github.com/example/app.git
+      branch: main
+    artifact:
+      signer:
+        repository: example/app
+        workflow: .github/workflows/release.yml
+    # Third-party programs the service runs, by published checksums:
+    executables:
+      - path: /usr/local/bin/helper
+        checksums:
+          url: https://example.com/releases/1.2.3/SHA256SUMS
+          signature:
+            type: minisign
+            publicKey: RWQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3
+servers:
+  - name: app1
+    host: app1.example.com

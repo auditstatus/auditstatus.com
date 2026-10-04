@@ -1,0 +1,12 @@
+{{- if not .Values.config.services }}
+{{- fail "config.services must list at least one service (see values.yaml)" }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "attester.name" . }}
+  labels:
+    {{- include "attester.labels" . | nindent 4 }}
+data:
+  config.yml: |
+    {{- toYaml .Values.config | nindent 4 }}

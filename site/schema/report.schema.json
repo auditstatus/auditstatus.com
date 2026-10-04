@@ -1,0 +1,175 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://auditstatus.com/schema/report.schema.json",
+  "title": "Audit Status report",
+  "description": "report.json, written by auditstatus verify (lib/verify.js, lib/report.js). Objects marked open may gain fields without a new version. See https://auditstatus.com/docs/reports/",
+  "type": "object",
+  "required": ["type", "version", "generatedAt", "verifier", "services", "status", "servers"],
+  "properties": {
+    "type": {"const": "auditstatus-report"},
+    "version": {"const": 2},
+    "generatedAt": {"type": "string", "pattern": "^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d(?:\\.\\d+)?Z$", "description": "When the report was written, ISO 8601 UTC"},
+    "verifier": {
+      "type": "object",
+      "required": ["version"],
+      "properties": {
+        "version": {"type": "string", "description": "The verifier's version"},
+        "action": {"type": "string", "description": "The Audit Status action and its ref (owner/repo@ref), when the action wrote the report"},
+        "run": {
+          "type": "object",
+          "description": "The GitHub Actions run that wrote the report; an attestation of the report names the same run, signed",
+          "required": ["url"],
+          "properties": {
+            "url": {"type": "string", "description": "The run's URL, with its attempt"},
+            "workflow": {"type": ["string", "null"], "description": "The workflow file and ref (GITHUB_WORKFLOW_REF)"},
+            "commit": {"type": ["string", "null"], "description": "The commit the workflow ran for (GITHUB_SHA)"}
+          }
+        }
+      }
+    },
+    "project": {
+      "type": "object",
+      "description": "The project, in reports the public Audit Status registry publishes",
+      "required": ["slug", "name", "url", "registry"],
+      "additionalProperties": false,
+      "properties": {
+        "slug": {"type": "string", "pattern": "^[a-z\\d](?:[a-z\\d-]{0,48}[a-z\\d])?$", "description": "The registry file's name, without .yml"},
+        "name": {"type": "string", "minLength": 1},
+        "url": {"type": "string", "pattern": "^https://", "description": "The project's website"},
+        "registry": {"type": "string", "pattern": "^https://", "description": "The registry file the project was verified with"}
+      }
+    },
+    "notice": {"type": "string", "description": "Why the report has no server results, when it has none (a registry run that did not finish)"},
+    "services": {
+      "type": "array",
+      "description": "Each configured service: name, repository, and artifact or image signer",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": {"type": "string"},
+          "repository": {
+            "type": ["object", "null"],
+            "properties": {
+              "url": {"type": "string"},
+              "branch": {"type": ["string", "null"]},
+              "webUrl": {"type": ["string", "null"]}
+            }
+          },
+          "artifact": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/signed"}]},
+          "image": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/signed"}]}
+        },
+        "additionalProperties": false
+      }
+    },
+    "status": {"$ref": "#/$defs/status"},
+    "servers": {"type": "array", "items": {"$ref": "#/$defs/server"}},
+    "files": {
+      "type": "object",
+      "description": "Paths of the three files written",
+      "properties": {"json": {"type": "string"}, "markdown": {"type": "string"}, "badge": {"type": "string"}},
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "status": {
+      "enum": ["pass", "warn", "fail", "error"],
+      "description": "pass: passing; warn: passing with warnings; fail: failing; error: inconclusive, never passing"
+    },
+    "signed": {
+      "type": "object",
+      "required": ["signer"],
+      "properties": {
+        "signer": {
+          "type": "object",
+          "properties": {"repository": {"type": "string"}, "workflow": {"type": ["string", "null"]}, "ref": {"type": ["string", "null"]}}
+        }
+      }
+    },
+    "counts": {
+      "type": "object",
+      "description": "Package counts by status (open)",
+      "properties": {
+        "total": {"type": "integer", "minimum": 0},
+        "verified": {"type": "integer", "minimum": 0},
+        "bundled": {"type": "integer", "minimum": 0},
+        "patched": {"type": "integer", "minimum": 0},
+        "built": {"type": "integer", "minimum": 0},
+        "failed": {"type": "integer", "minimum": 0},
+        "unverifiable": {"type": "integer", "minimum": 0},
+        "error": {"type": "integer", "minimum": 0}
+      }
+    },
+    "finding": {
+      "type": "object",
+      "required": ["severity", "check", "message"],
+      "properties": {
+        "severity": {"enum": ["fail", "warn", "error", "info"]},
+        "check": {"type": "string", "description": "The check's name, for example source, packages:npm, code, tpm"},
+        "message": {"type": "string"},
+        "service": {"type": "string"},
+        "detail": {"description": "Context for the finding: {items (up to 50), total}, a list, a text or another value; open"}
+      },
+      "additionalProperties": false
+    },
+    "service": {
+      "type": "object",
+      "description": "A per-service summary (open)",
+      "required": ["name"],
+      "properties": {
+        "name": {"type": "string"},
+        "kind": {"enum": ["directory", "container"]},
+        "root": {"type": ["string", "null"]},
+        "commit": {"type": ["string", "null"], "pattern": "^[\\da-f]{40,64}$"},
+        "commitDate": {"type": ["string", "null"]},
+        "commitSubject": {"type": ["string", "null"]},
+        "files": {"type": "object", "description": "tracked (or manifest), verified, modified, missing, untracked, ignored"},
+        "build": {"type": "object", "description": "verified, files"},
+        "packages": {"type": "object", "additionalProperties": {"$ref": "#/$defs/counts"}},
+        "processes": {"type": "integer", "minimum": 0},
+        "runtimes": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}},
+        "containers": {"type": "array", "items": {"type": "object"}}
+      }
+    },
+    "server": {
+      "type": "object",
+      "required": ["name", "status", "findings"],
+      "properties": {
+        "name": {"type": "string"},
+        "host": {"type": ["string", "null"]},
+        "status": {"$ref": "#/$defs/status"},
+        "level": {
+          "type": ["string", "null"],
+          "pattern": "^(?:software|(?:tpm|ima|sev-snp|tdx)(?:\\+(?:tpm|ima|sev-snp|tdx))*)$",
+          "description": "What backs the evidence: software, or hardware joined with +"
+        },
+        "hardware": {"type": "array", "items": {"type": "string"}},
+        "findings": {"type": "array", "items": {"$ref": "#/$defs/finding"}},
+        "summary": {
+          "type": "object",
+          "description": "Counts across the server (open)",
+          "properties": {
+            "processes": {"type": ["integer", "null"], "minimum": 0},
+            "globalPackages": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/counts"}]},
+            "code": {
+              "type": ["object", "null"],
+              "properties": {
+                "executables": {"type": "integer", "minimum": 0},
+                "libraries": {"type": "integer", "minimum": 0},
+                "explained": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}},
+                "differing": {"type": "integer", "minimum": 0},
+                "unexplained": {"type": "integer", "minimum": 0},
+                "unchecked": {"type": "integer", "minimum": 0}
+              }
+            }
+          }
+        },
+        "services": {"type": "array", "items": {"$ref": "#/$defs/service"}},
+        "collectedAt": {"type": ["string", "null"]},
+        "attesterVersion": {"type": ["string", "null"]},
+        "os": {"type": ["object", "null"]}
+      }
+    }
+  }
+}

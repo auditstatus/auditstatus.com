@@ -1,0 +1,13 @@
+apiVersion: v2
+name: auditstatus-attester
+description: The Audit Status attester on every node, for verifying what a Kubernetes cluster runs
+type: application
+version: 2.0.0
+appVersion: "2.0.0"
+home: https://auditstatus.com/
+sources:
+  - https://github.com/auditstatus/auditstatus.com
+keywords:
+  - attestation
+  - supply-chain
+  - security

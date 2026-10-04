@@ -1,0 +1,164 @@
+# Verifier configuration (every setting), checked into the repository whose
+# workflow runs `auditstatus verify` (for example a status page).
+# "auditstatus doctor --role verifier" checks it.
+
+version: 2
+
+# What each service is verified against.
+services:
+  - name: web
+    # The public repository: the deployed commit must be on this branch,
+    # and every tracked file must match it.
+    repository:
+      url: https://github.com/example/app.git
+      branch: main
+    # Files the deploy generates and the repository ignores.  The verifier
+    # runs the command in a clean checkout of the deployed commit and
+    # compares the files matching `outputs` with the server's.
+    build:
+      command: npm ci && npm run build
+      outputs:
+        - dist/**
+      env:
+        NODE_ENV: production
+      # Variables passed on from the verifier's environment (nothing else is).
+      passEnv: []
+      timeoutSeconds: 3600
+    # Lockfiles, when not in the default place.
+    # lockfiles:
+    #   pypi: backend/uv.lock
+    # Programs that no other reference explains, pinned by hash or by a
+    # signed checksum list the project publishes.
+    executables:
+      - path: /usr/local/bin/caddy
+        checksums:
+          url: https://github.com/caddyserver/caddy/releases/download/v2.8.4/caddy_2.8.4_checksums.txt
+          signature:
+            type: sigstore
+            url: https://github.com/caddyserver/caddy/releases/download/v2.8.4/caddy_2.8.4_checksums.txt.sigstore.json
+            identity:
+              subjectAlternativeName: /^https:\/\/github\.com\/caddyserver\/caddy\//
+
+  - name: api
+    repository:
+      url: https://github.com/example/api.git
+      branch: main
+    # A binary release deployed without git: the release carries
+    # .attestium-manifest.json, which this workflow built and attested.
+    artifact:
+      signer:
+        repository: example/api
+        workflow: .github/workflows/release.yml
+        ref: refs/heads/main
+    # Where go.mod is, for the dependencies built into Go binaries.
+    goModule: .
+
+  - name: worker
+    # Containers are compared with their image, fetched by digest.
+    image:
+      signer:
+        repository: example/worker
+      compareFiles: true
+      # Paths the container may write (glob patterns, relative to /).
+      allowChanges: [tmp/**, var/cache/**]
+
+references:
+  # Where the verifier downloads its references.  These defaults are the
+  # public sources; they are listed here for clarity.
+  nodeDistUrl: https://nodejs.org/dist
+  registryUrl: https://registry.npmjs.org
+  githubArchiveUrl: https://codeload.github.com
+  auditorChecksumsUrl: https://github.com/auditstatus/auditstatus.com/releases/download/v{version}/SHA256SUMS
+  cacheDir: .cache/auditstatus
+  # Other registries (mirrors): pypi, rubygems, hex, nuget, maven, packagist.
+  registries: {}
+  # Show which repository and commit built each npm package (Sigstore).
+  npmProvenance: false
+  sigstore:
+    tufUrl: https://tuf-repo-cdn.sigstore.dev
+  # Compare system binaries and libraries with the signed Debian or Ubuntu
+  # archive (the defaults for the server's release).
+  distro:
+    enabled: true
+  containerRegistries:
+    ghcr.io:
+      tokenEnv: GHCR_TOKEN
+  # GitHub's API (artifact attestations) and a token that raises its rate
+  # limit.  Set the URL for GitHub Enterprise Server.
+  githubApiUrl: https://api.github.com
+  githubTokenEnv: GITHUB_TOKEN
+  # AMD's key distribution service, for SEV-SNP chip certificates (VCEK).
+  amdKdsUrl: https://kdsintf.amd.com
+  # TPM manufacturer CA certificates (PEM) for `auditstatus tpm-verify`.
+  tpmRoots: []
+
+ssh:
+  user: auditstatus
+  port: 22
+  # Pinned host keys: collect them once with `ssh-keyscan -t ed25519 host`
+  # over a trusted path and review them.  Unknown or changed keys fail.
+  knownHosts: known_hosts
+  timeoutSeconds: 600
+
+kubernetes:
+  kubectl: kubectl
+  namespace: auditstatus
+  selector: app.kubernetes.io/name=auditstatus-attester
+  timeoutSeconds: 600
+
+policy:
+  # Untracked files the commit does not ignore, allowed anyway.
+  allowUntracked: []
+  # Files ignored by the commit that are nonetheless code: they must be
+  # explained by a build or a package.
+  codePaths: []
+  modifiedAfterStart: fail
+  metadataChangedAfterStart: fail
+  unofficialNode: fail
+  unverifiedAuditor: fail
+  unverifiablePackages: fail
+  buildOutputs: fail
+  # Executables and libraries no reference explains.
+  unexplainedCode: warn
+  # Python bytecode caches, packages compiled on the server, and packages
+  # compared with a registry because the lockfile pins no hash.
+  bytecode: warn
+  builtPackages: warn
+  unpinnedPackages: warn
+  containerChanges: fail
+  monitor: fail
+  maxEvidenceAgeSeconds: 900
+  maxCommitAgeDays: 30
+  # Collect a server that did not pass again after this many seconds (a
+  # deploy in progress), and report the second result.  0: no retry.
+  retryAfterSeconds: 600
+
+output:
+  dir: audit-status
+  label: audit
+
+servers:
+  - name: web1
+    host: 203.0.113.10
+    services: [web]
+    minProcesses: 2
+    # `auditstatus tpm-verify --server web1` prints these.  A pinned key
+    # makes a valid TPM quote mandatory for this server.
+    # tpm:
+    #   publicKey: |
+    #     -----BEGIN PUBLIC KEY-----
+    #     ...
+    #     -----END PUBLIC KEY-----
+  - name: api1
+    host: 203.0.113.11
+    services: [api]
+    # A confidential VM: its hardware report must verify and show this
+    # launch measurement.
+    # confidential:
+    #   type: sev-snp
+    #   measurements: [...]
+  - name: node-a
+    transport: kubernetes
+    services: [worker]
+    kubernetes:
+      node: node-a

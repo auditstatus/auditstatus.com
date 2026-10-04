@@ -1,0 +1,45 @@
+# yaml-language-server: $schema=https://auditstatus.com/schema/registry.schema.json
+#
+# Hardware evidence: a TPM 2.0 quote over the nonce and the evidence, and
+# the Linux IMA log replayed to PCR 10, so every file the kernel measured
+# under the service's root is checked with what the kernel saw, not what
+# the attester reports.  See docs/hardware.md for the IMA policy.
+#
+# The attestation key is enrolled once (auditstatus tpm-enroll on the
+# server, auditstatus tpm-verify from a verifier) and pinned here.
+#
+# On each server:
+#
+#   version: 2
+#   services:
+#     - name: vault
+#       root: /srv/vault
+#   tpm:
+#     enabled: true
+#   ima:
+#     enabled: true
+
+project:
+  name: Example Vault
+  url: https://vault.example.com
+  contact: security@example.com
+
+repository:
+  url: https://github.com/example/vault.git
+  branch: main
+
+services:
+  - name: vault
+    root: /srv/vault
+
+servers:
+  - name: vault-1
+    host: vault-1.example.com
+    tpm:
+      required: true
+      ima: true
+      publicKey: |
+        -----BEGIN PUBLIC KEY-----
+        MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEaEU7id0F7JnDQbjOVUEgEuW6By2m
+        kKttKmsPq5O2SFNpZN7pGn9DfKo8gOB3+Wm2n3RQj4ujAkPXJVNutHo7TQ==
+        -----END PUBLIC KEY-----

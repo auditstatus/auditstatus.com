@@ -1,0 +1,97 @@
+# /etc/auditstatus/config.yml on each audited server (every setting, with
+# its default).  "auditstatus doctor" checks it.
+#
+# Read by the forced command in the auditstatus user's authorized_keys:
+#   command="/usr/local/bin/auditstatus ssh",restrict ssh-ed25519 AAAA...
+#
+# The file must be owned by root and must not be writable by group or
+# others.  (Without capabilities, a file owned by the current user is also
+# accepted.)
+
+version: 2
+
+# What runs on this server.  Each service is a directory (a git checkout or
+# an attested release) or the containers matching a filter.
+services:
+  - name: web
+    # The deployed checkout (a clone of the public repository), or a
+    # release directory with .attestium-manifest.json.
+    root: /var/www/production/current
+    # Inspect processes of this user whose working directory is inside
+    # root (or cwd), whatever their language.
+    user: deploy
+    # cwd: /var/www/production
+    # Installed packages: auto detects node_modules, Python virtual
+    # environments, vendor/bundle, deps/, vendor/ (Composer), jar
+    # directories and .NET publish output.  Or a list, or false.
+    ecosystems: auto
+    # Installs outside root.  dir is where the packages are: for pypi the
+    # virtual environment's site-packages directory.
+    # installs:
+    #   - ecosystem: pypi
+    #     dir: /opt/venvs/web/lib/python3.12/site-packages
+    # Paths to leave out of the file list entirely (glob patterns).  Files
+    # the commit's .gitignore ignores are listed but not compared, so this
+    # is rarely needed.
+    exclude: []
+
+  - name: worker
+    # Every running container matching all of: name, id prefix, image
+    # (repository, with or without tag), label (key=value).
+    container:
+      image: ghcr.io/example/worker
+
+runtimes:
+  # Debugger and management ports that must not be listening (each
+  # runtime's default ports are always checked).
+  debugPorts: []
+  node:
+    # Global tools next to the Node.js binary (found from the running node
+    # when globalDir is not set).
+    globalPackages: [npm, corepack, pnpm, pm2]
+
+distro:
+  # Record the Debian or Ubuntu package that owns each executable and
+  # library, so the verifier can compare it with the signed archive.
+  enabled: true
+
+containers:
+  dockerSocket: /var/run/docker.sock
+  # Podman's Docker-compatible API (systemctl enable --now podman.socket).
+  podmanSocket: /run/podman/podman.sock
+  crictl: crictl
+  # Hash every file of each container's root filesystem (else only its
+  # writable layer is compared with the image).
+  hashRootfs: true
+  maxFiles: 500000
+
+tpm:
+  # auto: quote when a TPM is present.  true: report a missing TPM as a
+  # failure.  false: never use the TPM.
+  enabled: auto
+  handle: '0x81010002'
+  bank: sha256
+  # PCRs 0-7 by default, plus 10 when IMA is enabled.
+  # The endorsement key type for enrollment (auditstatus tpm-verify).
+  ekAlgorithm: rsa
+
+ima:
+  # With an IMA policy that measures executed and mmapped files, the kernel
+  # log of file hashes is verified against the TPM's PCR 10.
+  enabled: false
+
+confidential:
+  # auto: on an AMD SEV-SNP or Intel TDX guest (configfs-tsm), add a
+  # hardware report bound to the evidence.  true: require it.
+  enabled: auto
+
+monitor:
+  # Include what the auditstatus-monitor service recorded (every program
+  # and library loaded) since the last window.
+  enabled: false
+  log: /var/log/auditstatus/monitor.log
+  windowSeconds: 86400
+
+limits:
+  maxFiles: 500000
+  maxChangedFiles: 1000

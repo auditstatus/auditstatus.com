@@ -1,0 +1,13 @@
+---
+galaxy_info:
+  role_name: auditstatus_attester
+  author: Audit Status Community
+  description: Install the Audit Status attester on a server
+  license: MIT
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Ubuntu
+      versions: [jammy, noble]
+    - name: Debian
+      versions: [bookworm, trixie]
+dependencies: []

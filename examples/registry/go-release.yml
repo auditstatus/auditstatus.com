@@ -1,0 +1,37 @@
+# yaml-language-server: $schema=https://auditstatus.com/schema/registry.schema.json
+#
+# A Go service deployed as a release, without git: the release directory
+# holds .attestium-manifest.json, written and attested by the release
+# workflow (auditstatus manifest, then actions/attest-build-provenance).
+# The registry checks the attestation, that every file matches the
+# manifest, that the manifest's commit is the latest release, and the
+# dependencies built into the binary against go.sum.
+#
+# On each server:
+#
+#   version: 2
+#   services:
+#     - name: api
+#       root: /opt/api/current
+#       user: api
+
+project:
+  name: Example Go API
+  url: https://go.example.com
+  contact: security@example.com
+
+services:
+  - name: api
+    root: /opt/api/releases/current
+    repository:
+      url: https://github.com/example/go-api.git
+      branch: main
+      version: latest-release
+    artifact:
+      signer:
+        repository: example/go-api
+        workflow: .github/workflows/release.yml
+
+servers:
+  - name: api
+    host: go.example.com

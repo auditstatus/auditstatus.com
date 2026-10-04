@@ -1,0 +1,6 @@
+---
+- name: Restart the monitor
+  ansible.builtin.systemd_service:
+    name: auditstatus-monitor
+    state: restarted
+    daemon_reload: true

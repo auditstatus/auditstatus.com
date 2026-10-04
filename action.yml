@@ -1,0 +1,330 @@
+name: Audit Status
+description: Verify that your servers run exactly the code in your public repository, and publish the result.
+author: Audit Status Community
+branding:
+  icon: shield
+  color: green
+
+inputs:
+  config:
+    description: Verifier configuration file.
+    default: auditstatus.config.yml
+  ssh-key:
+    description: Private key allowed by the attester's forced command on each server (a secret).
+    default: ''
+  servers:
+    description: Space-separated server names to verify (default all).
+    default: ''
+  output:
+    description: Directory for report.json, report.md and badge.json (relative to the workspace, or absolute).
+    default: audit-status
+  publish-branch:
+    description: Commit the report to this branch (created if missing). Empty to skip.
+    default: ''
+  issue:
+    description: Open an issue when the audit does not pass, and close it when it passes again.
+    default: 'true'
+  fail-on:
+    description: 'Fail the job on: fail (a server failed), error (failed or inconclusive), or never. A configuration or usage error fails the job unless this is never.'
+    default: error
+  node-version:
+    description: Node.js version to run the verifier with (and any configured builds).
+    default: '22'
+  build-user:
+    description: 'Unprivileged account that configured builds run as, created on Linux runners (without sudo or other groups). Empty runs builds as the runner user, which lets them read the SSH key and token and change the cache.'
+    default: auditstatus-build
+  verify:
+    description: 'Run the verifier (true), or only publish the report already in output (false): for a job with write access that publishes what an earlier, read-only job verified and uploaded.'
+    default: 'true'
+  attest-report:
+    description: 'Sign report.json, report.md and badge.json with the workflow''s identity (a GitHub artifact attestation) and add the bundle as report.sigstore.json, so readers can check that this workflow wrote them: auto (when the job may request an OIDC token, "id-token: write", with "attestations: write"), true (required), or false.'
+    default: auto
+
+outputs:
+  status:
+    description: 'Overall status: pass, warn, fail or error.'
+    value: ${{ steps.verify.outputs.status }}
+  report:
+    description: Path to report.json.
+    value: ${{ steps.verify.outputs.report }}
+  attestation:
+    description: URL of the report's attestation, when it was attested.
+    value: ${{ steps.attest.outputs.attestation-url }}
+
+runs:
+  using: composite
+  steps:
+    # Pinned by commit: a tag can be moved, and these steps run in jobs
+    # that hold the SSH key and a token.
+    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    # The verifier is the code at the ref this action is pinned to.
+    - name: Install the verifier
+      if: inputs.verify != 'false'
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      env:
+        PNPM_URL: https://registry.npmjs.org/pnpm/-/pnpm-9.15.9.tgz
+        PNPM_INTEGRITY: sha512-aARhQYk8ZvrQHAeSMRKOmvuJ74fiaR1p5NQO7iKJiClf1GghgbrlW1hBjDolO95lpQXsfF+UA+zlzDzTfc8lMQ==
+      run: |
+        # pnpm by the registry's integrity for this version, as the lockfile
+        # pins the verifier's dependencies: this job holds the SSH key.
+        tarball="$(mktemp -d)/pnpm.tgz"
+        curl -fsSL --retry 3 -o "$tarball" "$PNPM_URL"
+        actual="sha512-$(node -e 'process.stdout.write(require("node:crypto").createHash("sha512").update(require("node:fs").readFileSync(process.argv[1])).digest("base64"))' "$tarball")"
+        if [ "$actual" != "$PNPM_INTEGRITY" ]; then
+          echo "::error::pnpm from $PNPM_URL does not match its pinned integrity"
+          exit 1
+        fi
+        npm install -g "$tarball" > /dev/null
+        pnpm install --prod --frozen-lockfile --ignore-scripts
+
+    # Where the verifier keeps its cache (references.cacheDir, relative to
+    # the configuration file) and writes the report (relative to the
+    # workspace, or absolute).
+    - name: Resolve paths
+      id: paths
+      shell: bash
+      env:
+        CONFIG: ${{ inputs.config }}
+        OUTPUT: ${{ inputs.output }}
+        LIB: ${{ github.action_path }}/lib/config.js
+      run: |
+        cache="$(node -e 'try { process.stdout.write(require(process.argv[1]).loadVerifierConfig(process.argv[2]).references.cacheDir); } catch {}' "$LIB" "$CONFIG")"
+        echo "cache=${cache:-$PWD/.cache/auditstatus}" >> "$GITHUB_OUTPUT"
+        case "$OUTPUT" in
+          /*) echo "output=$OUTPUT" >> "$GITHUB_OUTPUT" ;;
+          *) echo "output=$PWD/$OUTPUT" >> "$GITHUB_OUTPUT" ;;
+        esac
+
+    # The signed Debian archive is checked with this keyring (Ubuntu runners
+    # carry only Ubuntu's), so system packages of Debian servers can be verified.
+    - name: Install the Debian archive keyring
+      if: runner.os == 'Linux' && inputs.verify != 'false'
+      shell: bash
+      run: |
+        if [ ! -f /usr/share/keyrings/debian-archive-keyring.gpg ]; then
+          sudo apt-get install -y -qq --no-install-recommends debian-archive-keyring > /dev/null 2>&1 \
+            || { sudo apt-get update -qq > /dev/null 2>&1 && sudo apt-get install -y -qq --no-install-recommends debian-archive-keyring > /dev/null 2>&1; } \
+            || echo "::warning::debian-archive-keyring could not be installed: system packages of Debian servers will not be checked"
+        fi
+
+    # Builds run the audited repository's scripts: as an account of their
+    # own, they cannot read the runner user's processes and files (the SSH
+    # key, the token) or write the cache.  No password, no sudo, no groups
+    # but its own, no cron or at jobs.
+    - name: Create the build account
+      id: build-user
+      if: runner.os == 'Linux' && inputs.verify != 'false' && inputs.build-user != ''
+      shell: bash
+      env:
+        BUILD_USER: ${{ inputs.build-user }}
+      run: |
+        if ! id -u "$BUILD_USER" > /dev/null 2>&1; then
+          sudo useradd --system --user-group --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin "$BUILD_USER"
+        fi
+        if [ "$(id -u "$BUILD_USER")" = 0 ] || [ "$(id -G "$BUILD_USER")" != "$(id -g "$BUILD_USER")" ] \
+          || sudo -n -l -U "$BUILD_USER" 2> /dev/null | grep -q 'may run the following'; then
+          echo "::error::$BUILD_USER must be an unprivileged account without sudo or other groups"
+          exit 1
+        fi
+        for file in /etc/cron.deny /etc/at.deny; do
+          if ! sudo grep -qxF -- "$BUILD_USER" "$file" 2>/dev/null; then
+            echo "$BUILD_USER" | sudo tee -a "$file" > /dev/null
+          fi
+        done
+        echo "user=$BUILD_USER" >> "$GITHUB_OUTPUT"
+
+    - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      if: inputs.verify != 'false'
+      with:
+        path: ${{ steps.paths.outputs.cache }}
+        key: auditstatus-${{ runner.os }}-${{ github.run_id }}
+        restore-keys: auditstatus-${{ runner.os }}-
+
+    - name: Verify
+      id: verify
+      shell: bash
+      env:
+        AUDITSTATUS_SSH_KEY: ${{ inputs.ssh-key }}
+        GITHUB_TOKEN: ${{ github.token }}
+        AUDITSTATUS_BUILD_USER: ${{ steps.build-user.outputs.user }}
+        AUDITSTATUS_ACTION_REF: ${{ github.action_repository }}@${{ github.action_ref }}
+        CONFIG: ${{ inputs.config }}
+        OUTPUT: ${{ steps.paths.outputs.output }}
+        SERVERS: ${{ inputs.servers }}
+        VERIFY: ${{ inputs.verify }}
+        CLI: ${{ github.action_path }}/scripts/cli.js
+      run: |
+        code=
+        if [ "$VERIFY" != false ]; then
+          args=(verify --config "$CONFIG" --output "$OUTPUT")
+          for server in $SERVERS; do args+=(--server "$server"); done
+          # A report left from an earlier run (in the checkout, or restored)
+          # must not stand for this one if the verifier stops before writing.
+          rm -f "$OUTPUT/report.json" "$OUTPUT/report.md" "$OUTPUT/badge.json"
+          set +e
+          node "$CLI" "${args[@]}"
+          code=$?
+          set -e
+          if [ -f "$OUTPUT/report.md" ]; then cat "$OUTPUT/report.md" >> "$GITHUB_STEP_SUMMARY"; fi
+        fi
+        # Only a known status goes on: the report may come from another job.
+        status="$(node -e '
+          const {status} = require(process.argv[1]);
+          process.stdout.write(["pass", "warn", "fail", "error"].includes(status) ? status : "error");
+        ' "$OUTPUT/report.json" 2>/dev/null || echo error)"
+        echo "status=$status" >> "$GITHUB_OUTPUT"
+        echo "report=$OUTPUT/report.json" >> "$GITHUB_OUTPUT"
+        echo "code=$code" >> "$GITHUB_OUTPUT"
+
+    # Anyone who can push to the report's branch could edit it: the
+    # attestation, signed with this workflow's identity and recorded in a
+    # transparency log, lets a reader check that this run wrote the files
+    # (`auditstatus verify-report`, or `gh attestation verify`).
+    - name: Check whether to attest the report
+      id: attest-check
+      shell: bash
+      env:
+        ATTEST: ${{ inputs.attest-report }}
+        OUTPUT: ${{ steps.paths.outputs.output }}
+      run: |
+        case "$ATTEST" in
+          true | false | auto) ;;
+          *) echo "::error::attest-report must be auto, true or false"; exit 1 ;;
+        esac
+        if [ "$ATTEST" = false ] || [ ! -f "$OUTPUT/report.json" ]; then
+          exit 0
+        fi
+        if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+          if [ "$ATTEST" = true ]; then
+            echo "::error::attest-report needs the job permissions id-token: write and attestations: write"
+            exit 1
+          fi
+          echo "::notice::The report is not attested: give the job id-token: write and attestations: write, so readers can check who wrote it"
+          exit 0
+        fi
+        # The subjects: the report files that exist, and no earlier bundle.
+        rm -f "$OUTPUT/report.sigstore.json"
+        {
+          for file in report.json report.md badge.json; do
+            if [ -f "$OUTPUT/$file" ]; then echo "$OUTPUT/$file"; fi
+          done
+        } > "$RUNNER_TEMP/auditstatus-subjects"
+        {
+          echo 'subjects<<AUDITSTATUS_SUBJECTS_END'
+          cat "$RUNNER_TEMP/auditstatus-subjects"
+          echo 'AUDITSTATUS_SUBJECTS_END'
+        } >> "$GITHUB_OUTPUT"
+        echo "enabled=true" >> "$GITHUB_OUTPUT"
+
+    - name: Attest the report
+      id: attest
+      if: steps.attest-check.outputs.enabled == 'true'
+      continue-on-error: ${{ inputs.attest-report != 'true' }}
+      uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
+      with:
+        subject-path: ${{ steps.attest-check.outputs.subjects }}
+        show-summary: false
+
+    - name: Keep the attestation with the report
+      if: steps.attest.outputs.bundle-path != ''
+      shell: bash
+      env:
+        BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        OUTPUT: ${{ steps.paths.outputs.output }}
+      run: cp "$BUNDLE" "$OUTPUT/report.sigstore.json"
+
+    - name: Publish the report
+      if: inputs.publish-branch != ''
+      shell: bash
+      env:
+        BRANCH: ${{ inputs.publish-branch }}
+        OUTPUT: ${{ steps.paths.outputs.output }}
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        git check-ref-format --branch "$BRANCH" > /dev/null
+        # The branch holds the report and nothing else: publishing to the
+        # branch this workflow runs from would replace its files.
+        if [ "$BRANCH" = "${GITHUB_REF_NAME:-}" ]; then
+          echo "publish-branch must be a branch of its own, not $BRANCH" >&2
+          exit 1
+        fi
+        staging="$(mktemp -d)"
+        cp -R "$OUTPUT"/. "$staging"/
+        cd "$staging"
+        git init -q
+        git config user.name "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        # The token goes in a header from the environment, not in the URL
+        # (or any command line).
+        remote="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+        export GIT_CONFIG_COUNT=1
+        export GIT_CONFIG_KEY_0="http.${GITHUB_SERVER_URL}/.extraheader"
+        GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
+        export GIT_CONFIG_VALUE_0
+        if git fetch -q --depth 1 "$remote" "$BRANCH" 2>/dev/null; then
+          git reset -q --soft FETCH_HEAD
+        else
+          git checkout -q --orphan "$BRANCH"
+        fi
+        git add -A
+        git diff --cached --quiet || git commit -q -m "chore: audit status report"
+        git push -q "$remote" "HEAD:refs/heads/$BRANCH"
+
+    - name: Open or close an issue
+      if: inputs.issue == 'true'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        STATUS: ${{ steps.verify.outputs.status }}
+        OUTPUT: ${{ steps.paths.outputs.output }}
+      run: |
+        title="Audit Status is not passing"
+        # The search matches words anywhere in a title: keep only this title.
+        open="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "in:title \"$title\"" --json number,title \
+          | TITLE="$title" node -e '
+            const issues = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+            const issue = issues.find(item => item.title === process.env.TITLE);
+            if (issue) process.stdout.write(String(issue.number));
+          ' || true)"
+        if [ "$STATUS" = pass ] || [ "$STATUS" = warn ]; then
+          if [ -n "$open" ]; then gh issue close "$open" --repo "$GITHUB_REPOSITORY" --comment "Passing again."; fi
+        elif [ -z "$open" ] && [ -f "$OUTPUT/report.md" ]; then
+          # GitHub refuses an issue body over 65,536 characters: a longer
+          # report is cut at a line and links to the run, whose summary has
+          # all of it.
+          body="$(mktemp)"
+          node -e '
+            const fs = require("node:fs");
+            const [report, body, run] = process.argv.slice(1);
+            let text = fs.readFileSync(report, "utf8");
+            const characters = [...text];
+            if (characters.length > 60000) {
+              text = characters.slice(0, 60000).join("");
+              text = `${text.slice(0, text.lastIndexOf("\n") + 1)}\n---\n\nThe report is too long for an issue; the summary of ${run} has all of it.\n`;
+            }
+            fs.writeFileSync(body, text);
+          ' "$OUTPUT/report.md" "$body" "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body-file "$body"
+        fi
+
+    - name: Result
+      shell: bash
+      env:
+        STATUS: ${{ steps.verify.outputs.status }}
+        CODE: ${{ steps.verify.outputs.code }}
+        FAIL_ON: ${{ inputs.fail-on }}
+      run: |
+        # A configuration or usage error (exit status 2) verified nothing.
+        if [ "$FAIL_ON" != never ] && [ "$CODE" = 2 ]; then
+          echo "Audit Status: configuration or usage error" >&2
+          exit 1
+        fi
+        case "$FAIL_ON:$STATUS" in
+          never:*) exit 0 ;;
+          fail:fail | error:fail | error:error) echo "Audit Status: $STATUS" >&2; exit 1 ;;
+          *) exit 0 ;;
+        esac

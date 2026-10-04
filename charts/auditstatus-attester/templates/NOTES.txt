@@ -1,0 +1,28 @@
+The attester runs on every node in namespace {{ .Release.Namespace }}.
+
+In the verifier configuration:
+
+  kubernetes:
+    namespace: {{ .Release.Namespace }}
+    selector: app.kubernetes.io/name={{ include "attester.name" . }}
+{{- if ne (include "attester.name" .) "auditstatus-attester" }}
+    daemonSet: {{ include "attester.name" . }}
+{{- end }}
+{{- if ne (int .Values.port) 8740 }}
+    port: {{ include "attester.port" . }}
+{{- end }}
+  servers:
+    - name: <node>
+      transport: kubernetes
+      kubernetes:
+        node: <node name>
+
+{{- if .Values.verifier.create }}
+
+A token for the verifier (a CI secret):
+
+  kubectl -n {{ .Release.Namespace }} create token {{ .Values.verifier.name }} --duration 8760h
+
+The token may port-forward to every pod in {{ .Release.Namespace }}: keep
+only the attester in this namespace.
+{{- end }}

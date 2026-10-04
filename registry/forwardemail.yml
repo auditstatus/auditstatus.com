@@ -1,0 +1,177 @@
+# yaml-language-server: $schema=https://auditstatus.com/schema/registry.schema.json
+#
+# Forward Email, the registry's first project.
+#
+# Every production server must run the latest GitHub release of the public
+# forwardemail.net repository: its tracked files, its build (reproduced from
+# the release's commit), the official Node.js release, the npm packages its
+# lockfile pins (with their build provenance where they publish it), and no
+# other code in the application's processes.
+#
+# The servers are set up by ansible/playbooks/auditstatus.yml in
+# forwardemail/forwardemail.net: the attester and its configuration (the
+# service "forwardemail" below), Audit Status's keys (verifier/auditstatus.pub)
+# with the forced command, and each server's host key for this file
+# (auditstatus registry host-keys --project forwardemail --known-hosts ...).
+
+project:
+  name: Forward Email
+  url: https://forwardemail.net
+  description: Open-source, privacy-focused, encrypted email service
+  contact: security@forwardemail.net
+  github: titanism
+
+setup:
+  # The build's native modules compile with these.
+  apt: [python3, make, g++, libcurl4-openssl-dev]
+  # The servers' Node.js version (ansible/playbooks/node.yml): a build with
+  # another version can produce other output.
+  node: '18.20.4'
+
+repository:
+  url: https://github.com/forwardemail/forwardemail.net.git
+  branch: master
+  # The servers run the latest release: GitHub's latest release (not a
+  # draft or prerelease), by its tag.
+  version: latest-release
+
+# The pm2 deploy's checkout on every server, verified against the release's
+# commit and the build below.  The name matches the service in the
+# attester configuration the playbook writes.
+services:
+  - name: forwardemail
+    # Where /var/www/production/current points (each ecosystem-*.json
+    # deploys to /var/www/production).  A server that reports another
+    # directory fails.
+    root: /var/www/production/source
+
+references:
+  # Which repository and commit built each npm package that publishes
+  # Sigstore provenance; an attestation that does not verify fails.
+  npmProvenance: true
+
+ssh:
+  # A server's answer hashes the checkout, node_modules and every
+  # process's memory: a few minutes on the larger servers.
+  timeoutSeconds: 600
+
+policy:
+  # `pnpm install` runs husky, which writes its git hook shims to .husky/_
+  # (git hooks, not application code).
+  allowUntracked:
+    - .husky/_/**
+  # A deploy replaces files and rebuilds for several minutes: a server that
+  # does not pass is built and collected again after this delay before it
+  # is reported.
+  retryAfterSeconds: 600
+  # A release is deployed to every server within the hour after it is
+  # published: until then, a server that runs an earlier release is a
+  # warning.  After that, and for any other commit, it fails.
+  versionGraceSeconds: 3600
+  # node.yml sets the modes of everything under /var/www, so a file's or a
+  # directory's status can change while the application runs (each run
+  # removes other users' access from what deploys created since).  Changed
+  # contents still fail.  A status change alone can also be contents
+  # restored with an earlier modification time, or a file added and removed
+  # again: remove this line once node.yml no longer runs while the
+  # application does, or once the deploy user's umask is 007.
+  metadataChangedAfterStart: warn
+
+# The deploy builds browser assets and the Sieve parser into files the
+# repository ignores (scripts/pm2-post-deploy.sh).  The registry repeats
+# that build in a clean checkout of the release's commit, as an unprivileged
+# account in a job without the SSH key, and compares every output file with
+# each server's copy.
+build:
+  command: |
+    set -eu
+    # config/env.js requires a value for every key in .env.schema.  The
+    # build output does not depend on them (the application passes its
+    # PayPal plan IDs to the billing page at runtime).
+    placeholders="$(mktemp -d)"
+    openssl req -x509 -newkey rsa:2048 -nodes -subj /CN=placeholder -days 1 \
+      -keyout "$placeholders/key.pem" -out "$placeholders/cert.pem" 2>/dev/null
+    PLACEHOLDERS="$placeholders" node -e '
+      const fs = require("fs");
+      const parse = file => Object.fromEntries(fs.readFileSync(file, "utf8").split("\n")
+        .filter(line => /^[A-Z\d_]+=/.test(line))
+        .map(line => [line.slice(0, line.indexOf("=")), line.slice(line.indexOf("=") + 1)]));
+      const defaults = parse(".env.defaults");
+      const lines = [];
+      for (const key of Object.keys(parse(".env.schema"))) {
+        if (process.env[key] || (defaults[key] && defaults[key] !== "\"\"")) continue;
+        const file = /KEY_PATH$/.test(key) ? "key.pem" : "cert.pem";
+        lines.push(`${key}=${/_PATH$/.test(key) ? `${process.env.PLACEHOLDERS}/${file}` : "placeholder".padEnd(64, "0")}`);
+      }
+      fs.writeFileSync(".env", lines.join("\n") + "\n");
+    '
+    # pnpm as the deploy installs it (scripts/pm2-post-deploy.sh): the
+    # version in package.json, from npm, in a directory of its own (npx
+    # here would read this package.json and refuse its overrides).
+    PNPM_VERSION="$(node -p "require('./package.json').packageManager.replace(/^pnpm@/, '')")"
+    tools="$(mktemp -d)"
+    npm install --prefix "$tools" --no-audit --no-fund --loglevel=error "pnpm@$PNPM_VERSION"
+    "$tools/node_modules/.bin/pnpm" install --frozen-lockfile
+    NODE_ENV=production npm start build
+  outputs:
+    - build/**
+    - helpers/sieve/parser-generated.js
+  env:
+    # A production build refuses to start without a 32-byte API secret.
+    API_SECRETS: placeholder-api-secret-for-the-build-only
+    # The build runs with a new HOME each time, where puppeteer's install
+    # script would download about 1 GB of Chrome that the build does not
+    # use (the output is the same without).
+    PUPPETEER_SKIP_DOWNLOAD: "true"
+  timeoutSeconds: 1800
+
+# Each server's pm2 apps (ecosystem-<name>.json), each at least one
+# process: a server with fewer processes running the release fails.  The
+# host keys come from the playbook (auditstatus registry host-keys); a
+# server without them is not contacted, and is inconclusive.
+servers:
+  - name: web
+    host: 121.127.44.69
+    minProcesses: 2
+  - name: api
+    host: 121.127.44.68
+    minProcesses: 2
+  - name: bree
+    host: 121.127.44.75
+    minProcesses: 1
+  - name: caldav
+    host: 121.127.44.72
+    minProcesses: 2
+  - name: carddav
+    host: 121.127.44.103
+    minProcesses: 2
+  - name: imap
+    host: 121.127.44.70
+    minProcesses: 7
+  - name: pop3
+    host: 121.127.44.71
+    minProcesses: 5
+  - name: smtp-1
+    host: 149.28.215.223
+    minProcesses: 11
+  - name: smtp-2
+    host: 121.127.44.73
+    minProcesses: 11
+  - name: smtp-3
+    host: 121.127.44.66
+    minProcesses: 11
+  - name: mx-1
+    host: 121.127.44.56
+    minProcesses: 3
+  - name: mx-2
+    host: 121.127.44.59
+    minProcesses: 3
+  - name: mx-3
+    host: 138.197.213.185
+    minProcesses: 3
+  - name: mx-4
+    host: 104.248.224.170
+    minProcesses: 3
+  - name: sqlite
+    host: 121.127.44.61
+    minProcesses: 3
