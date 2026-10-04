@@ -191,6 +191,54 @@ test('a build checkout of a blobless clone has every file of the commit, or fail
   await assert.rejects(reference.checkout(commit, dir), /^Error: git checkout failed: error: invalid object /);
 });
 
+test('file history: each file\'s contents in the commits of the branch that changed it, from a blobless clone too', async t => {
+  const {root, repo, commit} = repository(t);
+  git(repo, 'config', 'uploadpack.allowFilter', 'true');
+  fs.writeFileSync(path.join(repo, 'a.js'), 'a2\n');
+  git(repo, 'commit', '-q', '-am', 'second');
+  // Removed, then added again with other contents.
+  git(repo, 'rm', '-q', 'dir/b.sh');
+  git(repo, 'commit', '-q', '-m', 'removed');
+  writeFiles(repo, {'dir/b.sh': 'b2\n'});
+  git(repo, 'add', '-A');
+  git(repo, 'commit', '-q', '-m', 'added again');
+  // A branch merged in: what the merge leaves counts, not the branch's steps.
+  git(repo, 'checkout', '-q', '-b', 'side');
+  fs.writeFileSync(path.join(repo, 'a.js'), 'side step\n');
+  git(repo, 'commit', '-q', '-am', 'side step');
+  fs.writeFileSync(path.join(repo, 'a.js'), 'a3\n');
+  git(repo, 'commit', '-q', '-am', 'side');
+  git(repo, 'checkout', '-q', 'main');
+  git(repo, 'merge', '-q', '--no-ff', '-m', 'merge', 'side');
+  const head = git(repo, 'rev-parse', 'HEAD');
+  // A release made on another branch from the first commit.
+  git(repo, 'checkout', '-q', '-b', 'release', commit);
+  fs.writeFileSync(path.join(repo, 'a.js'), 'r\n');
+  git(repo, 'commit', '-q', '-am', 'release');
+  const release = git(repo, 'rev-parse', 'HEAD');
+  git(repo, 'checkout', '-q', 'main');
+  const branch = new Set([sha256('a3\n'), sha256('a2\n'), sha256('a\n')]);
+
+  for (const url of [repo, `file://${repo}`]) {
+    const reference = new GitReference({url, branch: 'main', cacheDir: path.join(root, url.startsWith('file:') ? 'blobless' : 'cache')});
+    const history = await reference.fileHistory(head, ['a.js', 'dir/b.sh', 'link']);
+    assert.deepEqual(history, new Map([
+      ['a.js', branch],
+      ['dir/b.sh', new Set([sha256('b2\n'), sha256('b\n')])],
+      // IMA measures what a link points to.
+      ['link', new Set()],
+    ]));
+    // The first commit deployed again after later ones: those count too.
+    assert.deepEqual(await reference.fileHistory(commit, ['a.js']), new Map([['a.js', branch]]));
+    // The release, with the branch's commits.
+    await reference.fetchCommit(release);
+    assert.deepEqual(await reference.fileHistory(release, ['a.js']), new Map([['a.js', new Set([sha256('r\n'), ...branch])]]));
+  }
+
+  const reference = new GitReference({url: repo, branch: 'main', cacheDir: path.join(root, 'cache')});
+  await assert.rejects(reference.fileHistory('nope', ['a.js']), /^TypeError: Invalid commit id: nope$/);
+});
+
 test('versions: the branch tip, tags, pinned commits and ancestry', async t => {
   const {root, repo, commit} = repository(t);
   git(repo, 'tag', '-a', '-m', 'v1', 'v1.0.0');

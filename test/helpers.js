@@ -214,14 +214,31 @@ function imaEntry(file, contents, pcr = 10, algorithm = 'sha256') {
 }
 
 /**
- * Extend PCR 10 of a (simulated) TPM exactly as the kernel does for a log.
+ * The ima-ng entry the kernel logs for a file read while open for writing
+ * (open_writers, ToMToU): no file hash and an all-zero template digest.
+ * @param {string} file - measured path
+ * @returns {Buffer}
+ */
+function imaViolation(file) {
+  const entry = imaEntry(file, '');
+  // The template digest follows the PCR index.  The template data opens
+  // with the digest field: its length, "sha256:\0", then the file hash.
+  entry.fill(0, 4, 24);
+  const data = entry.length - (4 + 8 + 32 + 4 + Buffer.byteLength(`${file}\0`));
+  entry.fill(0, data + 12, data + 12 + 32);
+  return entry;
+}
+
+/**
+ * Extend PCR 10 of a (simulated) TPM exactly as the kernel does for a log:
+ * with the template data's digest, or all ones for a violation.
  * @param {Object} tpm - Attestium Tpm
  * @param {Buffer} log
  */
 async function extendImaLog(tpm, log) {
   const {ima} = require('attestium');
   for (const entry of ima.parseBinaryLog(log)) {
-    await tpm.extendPcr(entry.pcr, 'sha256', crypto.createHash('sha256').update(entry.templateData).digest('hex'));
+    await tpm.extendPcr(entry.pcr, 'sha256', entry.violation ? 'f'.repeat(64) : crypto.createHash('sha256').update(entry.templateData).digest('hex'));
   }
 }
 
@@ -634,6 +651,7 @@ module.exports = {
   hasDocker,
   startContainer,
   imaEntry,
+  imaViolation,
   extendImaLog,
   sleep,
   tempDir,

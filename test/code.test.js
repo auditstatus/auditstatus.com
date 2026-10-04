@@ -110,7 +110,7 @@ test('a release deployed without git is checked against its attested manifest', 
     const measuredLog = imaEntry(`${fs.realpathSync(release)}/bin/server`, 'evil');
     fs.writeFileSync(imaLog, measuredLog);
     await extendImaLog(tpm, measuredLog);
-    const hardware = await setup(t, {
+    const options = {
       world: {...world, attesterConfig: attesterFile},
       verifier: {
         services: service(world, {artifact: {signer}, root: fs.realpathSync(release)}),
@@ -124,11 +124,20 @@ test('a release deployed without git is checked against its attested manifest', 
         ima: {enabled: true, log: imaLog, maxBytes: 1024 * 1024},
       },
       referenceOptions: {trust},
-    });
-    const measured = await hardware.appraise();
+    };
+    const measured = await (await setup(t, options)).appraise();
     assert.equal(measured.level, 'tpm+ima');
     assert.deepEqual(messages(measured, 'fail'), ['The kernel measured project files whose contents differ from the attested release']);
     assert.deepEqual(detailOf(measured, 'The kernel measured project files whose contents differ from the attested release'), {items: ['bin/server'], total: 1});
+
+    // Restored and read again: the last measurement is the release's, and
+    // with no history to compare the earlier one with, it is a warning.
+    const genuine = imaEntry(`${fs.realpathSync(release)}/bin/server`, 'binary\n');
+    fs.appendFileSync(imaLog, genuine);
+    await extendImaLog(tpm, genuine);
+    const reread = await (await setup(t, options)).appraise();
+    assert.deepEqual(messages(reread, 'fail'), []);
+    assert.deepEqual(detailOf(reread, 'Since boot, the kernel also measured other contents for these project files (a previous deploy, or code loaded and then restored)'), {items: ['bin/server'], total: 1});
   }
 
   const swapped = await context.appraise({evidence: edit(evidence, item => item.services[0].manifest = Buffer.from('{}').toString('base64'))});

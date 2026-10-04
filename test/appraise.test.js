@@ -6,13 +6,14 @@ const fs = require('node:fs');
 const path = require('node:path');
 const {execFileSync} = require('node:child_process');
 const {Tpm, util, fileTree, evidence: evidenceFormat} = require('attestium');
-const {writeFiles, git, hasTpmSimulator, startSwtpm, imaEntry, extendImaLog} = require('./helpers');
+const {writeFiles, git, hasTpmSimulator, startSwtpm, imaEntry, imaViolation, extendImaLog} = require('./helpers');
 const {createWorld} = require('./world');
 const {normalizeVerifierConfig, loadAttesterConfig} = require('../lib/config');
 const {collectEvidence} = require('../lib/evidence');
 const {References} = require('../lib/references');
 const {appraiseServer, overallStatus, Findings} = require('../lib/appraise');
 const {qualifyingData} = require('../lib/evidence');
+const GitReference = require('../lib/git');
 
 const linux = process.platform === 'linux';
 
@@ -235,6 +236,7 @@ test('TPM quotes and IMA logs raise the evidence level', {skip: !linux || !hasTp
   assert.ok(messages(verified, 'info').includes('TPM quote verified with the pinned attestation key'));
   assert.ok(messages(verified, 'info').includes('IMA log verified against the TPM (5 measurements)'));
   assert.equal(verified.imaMeasurements, undefined, 'measurements are not published');
+  assert.equal(verified.imaWritten, undefined);
 
   const enrolled = await setup(t, {world, verifier: {servers: [{...servers[0], tpm: {...serverTpm, ekCertificate: 'AAAA'}}]}, attester: {...attester, ima: {enabled: false}}});
   assert.ok(messages(await enrolled.appraise(), 'info').includes('TPM quote verified with the pinned attestation key (enrolled against the TPM\'s endorsement certificate)'));
@@ -338,6 +340,89 @@ test('TPM quotes and IMA logs raise the evidence level', {skip: !linux || !hasTp
   assert.deepEqual(messages(await switchedOff.appraise(), 'fail'), ['A TPM quote is required but none was provided']);
 });
 
+test('IMA: other contents measured since boot are an earlier deploy when another commit has them, and code loaded and restored otherwise', {skip: !linux || !hasTpmSimulator}, async t => {
+  const world = await createWorld(t);
+  const root = fs.realpathSync(world.deployDir);
+  const first = fs.readFileSync(path.join(root, 'lib/util.js'));
+  // The server ran the first commit, then the second was deployed.
+  fs.writeFileSync(path.join(world.repo, 'lib/util.js'), 'module.exports = 2;\n');
+  git(world.repo, 'commit', '-q', '-am', 'second');
+  git(world.deployDir, 'pull', '-q');
+  await world.startApp();
+  const {tcti} = await startSwtpm(t);
+  const tpm = new Tpm({tcti});
+  const key = await tpm.createAttestationKey();
+  const imaLog = path.join(world.root, 'ima.log');
+  const measure = async entries => {
+    const log = Buffer.concat(entries);
+    fs.appendFileSync(imaLog, log);
+    await extendImaLog(tpm, log);
+  };
+
+  await measure([
+    imaEntry('boot_aggregate', 'boot'),
+    imaEntry(`${root}/lib/util.js`, first),
+    imaEntry(`${root}/lib/util.js`, fs.readFileSync(path.join(root, 'lib/util.js'))),
+    imaEntry(world.nodePath, fs.readFileSync(world.nodePath)),
+  ]);
+  const context = await setup(t, {
+    world,
+    verifier: {
+      servers: [{...world.verifierConfig.servers[0], tpm: {publicKey: key.publicKey, ima: true}}],
+      services: [{...world.verifierConfig.services[0], root}],
+    },
+    attester: {
+      tpm: {
+        enabled: true, tcti, handle: '0x81010002', bank: 'sha256', pcrs: [0, 7, 10],
+      },
+      ima: {enabled: true, log: imaLog, maxBytes: 1024 * 1024},
+    },
+  });
+  const ima = (result, severity) => result.findings.filter(finding => finding.check === 'ima' && finding.severity === severity && finding.detail).map(finding => [finding.message, finding.detail.items]);
+  const deployed = ['Since boot, the kernel also measured these project files as other commits of the branch have them (earlier deploys)', ['lib/util.js']];
+  const backdoor = ['Since boot, the kernel measured contents of these project files that no commit of the branch has: code loaded, then restored', ['index.js']];
+
+  const earlier = await context.appraise({...(await context.collect())});
+  assert.equal(earlier.level, 'tpm+ima');
+  assert.deepEqual(ima(earlier, 'info'), [deployed]);
+  assert.deepEqual(ima(earlier, 'warn'), []);
+  assert.deepEqual(ima(earlier, 'fail'), []);
+
+  // A backdoor loaded from index.js, then the file restored and read again:
+  // the last measurement is the commit's, the earlier one no commit's.
+  await measure([
+    imaEntry(`${root}/index.js`, 'require("./backdoor");\n'),
+    imaEntry(`${root}/index.js`, fs.readFileSync(path.join(root, 'index.js'))),
+  ]);
+  const restored = await context.appraise({...(await context.collect())});
+  assert.equal(restored.status, 'fail');
+  assert.deepEqual(ima(restored, 'fail'), [backdoor]);
+  assert.deepEqual(ima(restored, 'info'), [deployed]);
+
+  // A deploy wrote package.json as it was read: the kernel logged the open
+  // writer and hashed the file half written, then whole at the next read.
+  const packageJson = fs.readFileSync(path.join(root, 'package.json'));
+  await measure([
+    imaViolation(`${root}/package.json`),
+    imaEntry(`${root}/package.json`, packageJson.subarray(0, 10)),
+    imaEntry(`${root}/package.json`, packageJson),
+  ]);
+  const written = await context.appraise({...(await context.collect())});
+  assert.deepEqual(ima(written, 'warn'), [['Since boot, the kernel measured contents of these project files that no commit of the branch has, while they were open for writing (a deploy writing a file as it was read, or code loaded and then restored)', ['package.json']]]);
+  assert.deepEqual(ima(written, 'fail'), [backdoor]);
+  assert.deepEqual(ima(written, 'info'), [deployed]);
+
+  // Without the repository's history, neither can be told apart.
+  const original = GitReference.prototype.fileHistory;
+  GitReference.prototype.fileHistory = () => Promise.reject(new Error('git log failed'));
+  t.after(() => {
+    GitReference.prototype.fileHistory = original;
+  });
+  const unknown = await context.appraise({...(await context.collect())});
+  assert.deepEqual(ima(unknown, 'warn'), [['Since boot, the kernel also measured other contents for these project files (a previous deploy, or code loaded and then restored)', ['index.js', 'lib/util.js', 'package.json']]]);
+  assert.deepEqual(ima(unknown, 'fail'), []);
+});
+
 test('IMA: every file the kernel measured under the service root must be explained, with the contents verified', {skip: !linux || !hasTpmSimulator}, async t => {
   const world = await createWorld(t);
   const root = fs.realpathSync(world.deployDir);
@@ -437,7 +522,7 @@ test('IMA: earlier contents since boot, and logs that cannot be replayed', {skip
   const key = await tpm.createAttestationKey();
   const root = fs.realpathSync(world.deployDir);
   const imaLog = path.join(world.root, 'ima.log');
-  // Util.js was measured with other contents first (an earlier deploy), then with the committed ones.
+  // Util.js was measured with contents no commit has, then with the committed ones.
   const log = Buffer.concat([
     imaEntry(`${root}/lib/util.js`, 'module.exports = 0;\n'),
     imaEntry(`${root}/lib/util.js`, fs.readFileSync(path.join(root, 'lib/util.js'))),
@@ -453,8 +538,8 @@ test('IMA: earlier contents since boot, and logs that cannot be replayed', {skip
   const context = await setup(t, {world, verifier: {servers, services: [{...world.verifierConfig.services[0], root}]}, attester});
   const result = await context.appraise();
   assert.equal(result.level, 'tpm+ima');
-  assert.equal(result.status, 'warn');
-  assert.deepEqual(result.findings.find(finding => finding.check === 'ima' && finding.severity === 'warn').detail, {items: ['lib/util.js'], total: 1});
+  assert.equal(result.status, 'fail');
+  assert.deepEqual(result.findings.find(finding => finding.check === 'ima' && finding.severity === 'fail').detail, {items: ['lib/util.js'], total: 1});
 
   // A legacy "ima" template entry cannot be replayed into the SHA-256 bank.
   const u32 = value => {

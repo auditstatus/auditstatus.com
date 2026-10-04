@@ -9,7 +9,9 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const yaml = require('js-yaml');
-const {tempDir, writeFiles, git} = require('./helpers');
+const {
+  tempDir, writeFiles, git, startSwtpm, hasTpmCertificates,
+} = require('./helpers');
 const {createWorld} = require('./world');
 const {run, EXIT} = require('../scripts/cli');
 const registry = require('../lib/registry');
@@ -527,6 +529,92 @@ test('host-keys adds each server\'s keys from known_hosts lines, keeping the res
   const usage = await cli(['registry', 'host-keys', '--dir', dir, '--project', 'example']);
   assert.equal(usage.code, EXIT.usage);
   assert.match(usage.stderr, /registry host-keys needs --project <name> and --known-hosts <file>/);
+});
+
+test('tpm-verify enrolls each server\'s TPM and pins its key, keeping the rest of the file', {skip: !linux || !hasTpmCertificates}, async t => {
+  const certified = await startSwtpm(t, {ekCertificate: true});
+  const bare = await startSwtpm(t);
+  const directory = tempDir(t);
+  const attester = (name, lines) => {
+    const file = path.join(directory, `${name}.yml`);
+    fs.writeFileSync(file, [`projectRoot: ${directory}`, 'distro:', '  enabled: false', ...lines, ''].join('\n'), {mode: 0o600});
+    return file;
+  };
+
+  // Each server answers through its own attester here, as over SSH.
+  const attesters = {
+    web1: attester('web1', ['tpm:', `  tcti: "${certified.tcti}"`]),
+    web2: attester('web2', ['tpm:', `  tcti: "${bare.tcti}"`]),
+    web3: attester('web3', ['tpm:', '  enabled: false']),
+  };
+  const registryOptions = {
+    adjust: config => ({...config, servers: config.servers.map(server => (attesters[server.name] ? {...server, transport: 'local', attesterConfig: attesters[server.name]} : server))}),
+  };
+  const earlier = crypto.generateKeyPairSync('ec', {namedCurve: 'prime256v1'}).publicKey.export({type: 'spki', format: 'pem'});
+  const pcrs = {sha256: {0: 'a'.repeat(64)}};
+  const head = '# Example\'s servers.\nproject:\n  name: Example\n  url: https://example.com\n  contact: ops@example.com\nrepository:\n  url: https://github.com/example/app.git\n  branch: main\n';
+  const source = `${head}${yaml.dump({
+    servers: [
+      {
+        name: 'web1', host: '203.0.113.10', hostKeys: [hostKey()], tpm: {publicKey: earlier, expectedPcrs: pcrs},
+      },
+      {name: 'web2', host: '203.0.113.11', hostKeys: [hostKey('root@web2')]},
+      {name: 'web3', host: '203.0.113.12', hostKeys: [hostKey('root@web3')]},
+      {name: 'web4', host: '203.0.113.13'},
+    ],
+  })}`;
+  const dir = registryDir(t, {'example.yml': source});
+  const args = ['registry', 'tpm-verify', '--dir', dir, '--project', 'example', '--work', tempDir(t), '--roots', certified.ca.issuer];
+
+  // Printed: web1 against its manufacturer's CA, replacing its earlier key
+  // and keeping its PCR values; web3 has no TPM, and web4 no host keys.
+  const printed = await cli([...args, '--ima'], {registryOptions});
+  assert.equal(printed.code, EXIT.inconclusive);
+  assert.ok(printed.stdout.startsWith(`${head}servers:\n`));
+  const [web1, web2, web3, web4] = yaml.load(printed.stdout).servers;
+  assert.deepEqual(Object.keys(web1.tpm), ['required', 'ima', 'publicKey', 'ekCertificate', 'expectedPcrs']);
+  assert.equal(web1.tpm.required, true);
+  assert.equal(web1.tpm.ima, true);
+  assert.match(web1.tpm.publicKey, /^-{5}BEGIN PUBLIC KEY-{5}\n/);
+  assert.notEqual(web1.tpm.publicKey, earlier);
+  assert.deepEqual(web1.tpm.expectedPcrs, {sha256: {0: 'a'.repeat(64)}});
+  assert.ok(web1.tpm.ekCertificate);
+  // The TPM of web2 has no EK certificate: refused unless asked for.
+  assert.equal(web2.tpm, undefined);
+  assert.equal(web3.tpm, undefined);
+  assert.equal(web4.tpm, undefined);
+  const lines = printed.stderr.split('\n');
+  assert.ok(lines[0].startsWith('web1: the attestation key is in the TPM whose EK certificate chains to '));
+  assert.equal(lines[1], 'auditstatus: web2: The TPM has no EK certificate; pass --allow-uncertified to enroll it anyway (virtual TPMs)');
+  assert.match(lines[2], /^auditstatus: web3: /);
+  assert.equal(lines[3], 'auditstatus: web4: no SSH host keys are pinned for this server yet (registry host-keys)');
+  assert.equal(fs.readFileSync(path.join(dir, 'example.yml'), 'utf8'), source);
+
+  // Written, one server at a time; without --ima only the quote is required.
+  const uncertified = await cli([...args, '--server', 'web2', '--allow-uncertified', '--write'], {registryOptions});
+  assert.equal(uncertified.code, EXIT.ok, uncertified.stderr);
+  assert.equal(uncertified.stdout, `Pinned the TPM keys of 1 server(s) in ${dir}/example.yml: web2\n`);
+  assert.match(uncertified.stderr, /^auditstatus: warning: web2: The TPM has no EK certificate/);
+  assert.ok(uncertified.stderr.endsWith('web2: the attestation key is in the TPM\n'));
+  const written = registry.readProject('example', dir).raw.servers;
+  assert.deepEqual(Object.keys(written[1].tpm), ['required', 'publicKey']);
+  assert.equal(written[0].tpm.publicKey, earlier);
+  // The file is still a registry file, whose verifier requires the quote.
+  assert.equal(registry.prepareProject('example', {dir, work: tempDir(t)}).config.servers[1].tpm.required, true);
+  const none = await cli([...args, '--server', 'web4', '--write'], {registryOptions});
+  assert.equal(none.code, EXIT.inconclusive);
+  assert.equal(none.stdout, `Pinned the TPM keys of 0 server(s) in ${dir}/example.yml\n`);
+
+  // Usage: the project, and the CAs or --allow-uncertified.
+  for (const argv of [['registry', 'tpm-verify', '--dir', dir, '--roots', certified.ca.issuer], ['registry', 'tpm-verify', '--dir', dir, '--project', 'example']]) {
+    const usage = await cli(argv);
+    assert.equal(usage.code, EXIT.usage);
+    assert.match(usage.stderr, /registry tpm-verify needs --project <name>, and --roots <file>/);
+  }
+
+  const unknown = await cli([...args, '--server', 'web9'], {registryOptions});
+  assert.equal(unknown.code, EXIT.usage);
+  assert.equal(unknown.stderr, 'auditstatus: --server web9 is not a server of example\n');
 });
 
 test('a server whose host keys are not pinned yet is not contacted, and is inconclusive', async t => {

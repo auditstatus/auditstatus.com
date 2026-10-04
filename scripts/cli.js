@@ -73,6 +73,12 @@ Public registry (registry/<project>.yml in the Audit Status repository):
   registry readme    Write (or --check) the projects table in README.md
   registry host-keys Add each server's host keys from a known_hosts file
                      --project name --known-hosts file [--write]
+  registry tpm-verify
+                     Enroll each server's TPM as tpm-verify does, and pin its
+                     key with a quote required (--ima: and an IMA log)
+                     --project name [--server name]... [--roots file]...
+                     [--allow-uncertified] [--ima] [--write]
+                     (SSH key from $AUDITSTATUS_SSH_KEY)
 
 Releases (in CI):
   manifest    Write a release manifest of a directory for attestation
@@ -715,6 +721,79 @@ async function registryCommand([subcommand, ...args], {
       return EXIT.ok;
     }
 
+    // Enrollment as tpm-verify does it, over the registry file's servers,
+    // with a key the servers allow (the operator's, through the same
+    // forced command): each key pinned is in the TPM whose EK certificate
+    // chains to one of --roots.
+    case 'tpm-verify': {
+      const values = parse(args, {
+        ...common,
+        project: {type: 'string'},
+        work: {type: 'string'},
+        server: {type: 'string', multiple: true, default: []},
+        roots: {type: 'string', multiple: true, default: []},
+        'allow-uncertified': {type: 'boolean', default: false},
+        ima: {type: 'boolean', default: false},
+        write: {type: 'boolean', default: false},
+      });
+      if (!values.project || (values.roots.length === 0 && !values['allow-uncertified'])) {
+        stderr.write('auditstatus: registry tpm-verify needs --project <name>, and --roots <file> with the CA certificates of the servers\' TPM manufacturers'
+          + ' (or --allow-uncertified for TPMs without an EK certificate)\n');
+        return EXIT.usage;
+      }
+
+      const prepared = project(values);
+      const {config} = prepared;
+      const unknown = values.server.filter(name => !config.servers.some(server => server.name === name));
+      if (unknown.length > 0) {
+        stderr.write(`auditstatus: --server ${oneLine(unknown.join(', ')).slice(0, 200)} is not a server of ${prepared.slug}\n`);
+        return EXIT.usage;
+      }
+
+      const {enrollTpm} = require('../lib/enroll');
+      const {createTransport} = require('../lib/transport');
+      const transport = io.transport || createTransport(config, {privateKey: withholdCredentials(env, config).AUDITSTATUS_SSH_KEY});
+      const pending = new Set(registry.pendingServers(prepared.raw));
+      const keys = new Map();
+      let incomplete = false;
+      for (const name of values.server.length > 0 ? values.server : config.servers.map(server => server.name)) {
+        if (pending.has(name)) {
+          stderr.write(`auditstatus: ${name}: no SSH host keys are pinned for this server yet (registry host-keys)\n`);
+          incomplete = true;
+          continue;
+        }
+
+        try {
+          const result = await enrollTpm({
+            server: config.servers.find(server => server.name === name),
+            transport,
+            roots: values.roots.map(file => path.resolve(file)),
+            allowUncertified: values['allow-uncertified'],
+          });
+          for (const warning of result.warnings) {
+            stderr.write(`auditstatus: warning: ${name}: ${warning}\n`);
+          }
+
+          stderr.write(`${name}: the attestation key is in the TPM${result.chain ? ` whose EK certificate chains to ${result.chain.at(-1)}` : ''}\n`);
+          keys.set(name, result);
+        } catch (error) {
+          stderr.write(`auditstatus: ${name}: ${oneLine(error.message)}\n`);
+          incomplete = true;
+        }
+      }
+
+      const {text, servers} = registry.withTpmKeys(prepared.slug, keys, values.dir, {ima: values.ima});
+      if (values.write) {
+        fs.writeFileSync(path.join(values.dir, `${prepared.slug}.yml`), text);
+        registry.readProject(prepared.slug, values.dir);
+        out(`Pinned the TPM keys of ${servers.length} server(s) in ${values.dir}/${prepared.slug}.yml${servers.length > 0 ? `: ${servers.join(', ')}` : ''}`);
+      } else {
+        stdout(text);
+      }
+
+      return incomplete ? EXIT.inconclusive : EXIT.ok;
+    }
+
     case 'readme': {
       const values = parse(args, {...common, readme: {type: 'string', default: 'README.md'}, check: {type: 'boolean', default: false}});
       const text = fs.readFileSync(values.readme, 'utf8');
@@ -737,7 +816,7 @@ async function registryCommand([subcommand, ...args], {
     }
 
     default: {
-      stderr.write('auditstatus: registry needs one of: validate, plan, build, audit, publish, readme, host-keys\n');
+      stderr.write('auditstatus: registry needs one of: validate, plan, build, audit, publish, readme, host-keys, tpm-verify\n');
       return EXIT.usage;
     }
   }

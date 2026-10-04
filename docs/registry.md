@@ -111,6 +111,16 @@ node scripts/cli.js registry host-keys --project example --known-hosts known_hos
 
 A server without `hostKeys` is not contacted, and its result is inconclusive.
 
+#### TPM keys
+
+A server with a TPM 2.0 can sign each answer with it and, with IMA, show what its kernel measured ([Hardware evidence](hardware.md)). Pin each server's attestation key once its attester runs: allow your own SSH key on the server with the same forced command as the registry's keys, and enroll from your fork:
+
+```sh
+AUDITSTATUS_SSH_KEY="$(cat ~/.ssh/id_ed25519)" node scripts/cli.js registry tpm-verify --project example --roots tpm-cas.pem --ima --write
+```
+
+For each server with pinned host keys, it checks that the TPM's EK certificate chains to a CA certificate in `--roots` (your TPMs' manufacturers'), and that the attestation key is in that TPM, then pins the key with `required: true`, and `ima: true` with `--ima`. `--allow-uncertified` enrolls a TPM without an EK certificate, such as a virtual TPM. From then on the server fails without a quote from its own TPM, and with `--ima`, without an IMA log that replays to the quote.
+
 ### 5. Open a pull request
 
 Check the file in your fork before you open the pull request:

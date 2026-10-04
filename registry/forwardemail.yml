@@ -13,6 +13,14 @@
 # service "forwardemail" below), Audit Status's keys (verifier/auditstatus.pub)
 # with the forced command, and each server's host key for this file
 # (auditstatus registry host-keys --project forwardemail --known-hosts ...).
+#
+# The playbook also creates each server's TPM attestation key and starts
+# IMA, which measures the code the application loads.  Each server's key
+# is pinned below once enrolled (auditstatus registry tpm-verify --project
+# forwardemail --roots <TPM CAs> --ima --write): from then on the server
+# fails without a quote from its own TPM and an IMA log that replays to
+# the quoted PCR 10, so a file modified, loaded and restored shows in the
+# kernel's log.
 
 project:
   name: Forward Email
@@ -68,14 +76,15 @@ policy:
   # published: until then, a server that runs an earlier release is a
   # warning.  After that, and for any other commit, it fails.
   versionGraceSeconds: 3600
-  # node.yml sets the modes of everything under /var/www, so a file's or a
-  # directory's status can change while the application runs (each run
-  # removes other users' access from what deploys created since).  Changed
-  # contents still fail.  A status change alone can also be contents
-  # restored with an earlier modification time, or a file added and removed
-  # again: remove this line once node.yml no longer runs while the
-  # application does, or once the deploy user's umask is 007.
-  metadataChangedAfterStart: warn
+  # Code whose contents or status changed after a process started fails
+  # (modifiedAfterStart and metadataChangedAfterStart keep their default):
+  # Linux sets a file's status-change time on every change, so a file
+  # modified, loaded and restored with its old modification time is
+  # caught, and so is a file added and removed again (only root can set
+  # the clock back, and IMA records what the application loads even
+  # then).  The deploy gives the checkout the modes node.yml sets before
+  # the applications restart (scripts/pm2-post-deploy.sh), so node.yml
+  # changes nothing under them.
 
 # The deploy builds browser assets and the Sieve parser into files the
 # repository ignores (scripts/pm2-post-deploy.sh).  The registry repeats
