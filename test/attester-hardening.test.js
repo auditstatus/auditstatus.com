@@ -29,6 +29,37 @@ const hasPython = linux && (() => {
   }
 })();
 
+/**
+ * Where the tests move processes between cgroups: the cgroup v2 hierarchy
+ * (mounted at /sys/fs/cgroup, or beside cgroup v1 for systemd), else the
+ * pids controller of cgroup v1.
+ */
+function cgroupHierarchy() {
+  if (!linux) {
+    return {};
+  }
+
+  const mount = fs.readFileSync('/proc/self/mountinfo', 'utf8').split('\n')
+    .map(line => line.split(' - '))
+    .find(([, filesystem]) => filesystem && filesystem.split(' ')[0] === 'cgroup2');
+  if (mount) {
+    return {root: mount[0].split(' ')[4], unified: true};
+  }
+
+  return fs.existsSync('/sys/fs/cgroup/pids') ? {root: '/sys/fs/cgroup/pids', unified: false} : {};
+}
+
+const cgroups = cgroupHierarchy();
+
+/**
+ * The directory of a process's cgroup in that hierarchy.
+ */
+function cgroupOf(pid) {
+  const lines = fs.readFileSync(`/proc/${pid}/cgroup`, 'utf8').split('\n');
+  const line = cgroups.unified ? lines.find(item => item.startsWith('0::')) : lines.find(item => item.split(':')[1] === 'pids');
+  return path.join(cgroups.root, line.split(':').slice(2).join(':'));
+}
+
 function config(projectRoot, overrides = {}) {
   return normalizeAttesterConfig({
     projectRoot,
@@ -108,11 +139,11 @@ test('git files the deploy user controls cannot make the attester wait or read w
   assert.deepEqual(readGitHead(project), {commit: null, error: 'EFBIG'});
 });
 
-test('a process in a cgroup named like a container but in the host\'s root is still the service\'s', {skip: !root || !fs.existsSync('/sys/fs/cgroup/pids')}, async t => {
+test('a process in a cgroup named like a container but in the host\'s root is still the service\'s', {skip: !root || !cgroups.root}, async t => {
   const project = tempDir(t);
   writeFiles(project, {'index.js': 'ok\n'});
   // A user can make such a cgroup wherever systemd delegates one to it.
-  const cgroup = path.join('/sys/fs/cgroup/pids/docker', 'e'.repeat(64));
+  const cgroup = path.join(cgroups.root, 'docker', 'e'.repeat(64));
   const created = !fs.existsSync(path.dirname(cgroup));
   try {
     fs.mkdirSync(cgroup, {recursive: true});
@@ -260,7 +291,7 @@ test('a mapped package\'s directory replaced by a link after the maps were read 
   assert.deepEqual(record.installs[0].errors, [{path: 'other', error: 'ENOENT'}, {path: 'linked', error: 'ENOENT'}]);
 });
 
-test('a process that names a container\'s cgroup from a root of its own does not speak for the container', {skip: !root || !hasDocker || !fs.existsSync('/sys/fs/cgroup/pids')}, async t => {
+test('a process that names a container\'s cgroup from a root of its own does not speak for the container', {skip: !root || !hasDocker || !cgroups.root}, async t => {
   // With unprivileged user namespaces, a user can chroot and move a process
   // into a cgroup it was delegated.  Started before the container, it has
   // a lower pid than any of the container's processes.
@@ -271,8 +302,7 @@ test('a process that names a container\'s cgroup from a root of its own does not
   t.after(() => forger.kill('SIGKILL'));
   const init = Number(execFileSync('docker', ['inspect', '-f', '{{.State.Pid}}', id], {encoding: 'utf8'}).trim());
   assert.ok(forger.pid < init);
-  const cgroup = fs.readFileSync(`/proc/${init}/cgroup`, 'utf8').split('\n').find(line => line.split(':')[1] === 'pids').split(':')[2];
-  fs.writeFileSync(path.join('/sys/fs/cgroup/pids', cgroup, 'cgroup.procs'), String(forger.pid));
+  fs.writeFileSync(path.join(cgroupOf(init), 'cgroup.procs'), String(forger.pid));
   assert.ok(fs.readFileSync(`/proc/${forger.pid}/cgroup`, 'utf8').includes(id));
 
   const evidence = await collectEvidence(normalizeAttesterConfig({

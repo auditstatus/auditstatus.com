@@ -394,7 +394,8 @@ test('the monitor: programs loaded since the last audit must be explained', {ski
     `${now - 3000} exec 11 1000 ${stray}`,
     `${now - 2500} exec 11 1000 /gone/program`,
     `${now - 2000} exec 12 0 ${tampered}`,
-    `${now - 1500} exec 13 0 /bin/busybox`,
+    // A program whose directory a file has replaced since.
+    `${now - 1500} exec 13 0 ${stray}/busybox`,
     // A path longer than the monitor keeps: only its start is recorded.
     `${now - 1000} exec 14 0 ${world.root}/programs/a-program-with-a-long-na\\+`,
     '',
@@ -406,7 +407,7 @@ test('the monitor: programs loaded since the last audit must be explained', {ski
   const prefix = entry => `exec ${entry} (1×, last `;
   assert.ok(detailOf(result, 'Programs or libraries loaded since the last audit that no reference explains').items.some(item => item.startsWith(prefix(stray))));
   assert.ok(detailOf(result, 'Programs or libraries loaded since the last audit are no longer on disk').items.some(item => item.startsWith(prefix('/gone/program')) && item.endsWith(': ENOENT')));
-  assert.ok(detailOf(result, 'Programs or libraries loaded since the last audit are no longer on disk').items.some(item => item.startsWith(prefix('/bin/busybox'))));
+  assert.ok(detailOf(result, 'Programs or libraries loaded since the last audit are no longer on disk').items.some(item => item.startsWith(prefix(`${stray}/busybox`)) && item.endsWith(': ENOTDIR')));
   // A path cut short is not a file that went away: it names no file for sure.
   const cut = `${world.root}/programs/a-program-with-a-long-na`;
   assert.ok(!detailOf(result, 'Programs or libraries loaded since the last audit are no longer on disk').items.some(item => item.includes(cut)));
