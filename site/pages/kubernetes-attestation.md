@@ -1,5 +1,5 @@
 <!--
-title: Kubernetes attestation for container workloads
+title: Kubernetes attestation for containers
 description: Run the Audit Status attester as a DaemonSet and verify every pod's containers against their images by digest, with no open port and no exec access.
 label: Kubernetes attestation
 keywords: kubernetes attestation, container verification, DaemonSet, image digest, helm chart, port-forward, runtime verification

@@ -13,19 +13,24 @@ const SITE = 'https://auditstatus.com';
 const root = path.join(__dirname, '..');
 
 // Schema.org types used in the structured data, with the properties each may carry.
-const CREATIVE_WORK = ['@type', '@id', 'url', 'name', 'headline', 'description', 'inLanguage', 'isPartOf', 'publisher', 'author', 'image', 'dateModified', 'keywords', 'breadcrumb', 'mainEntity'];
+const CREATIVE_WORK = ['@type', '@id', 'url', 'mainEntityOfPage', 'name', 'headline', 'description', 'inLanguage', 'isPartOf', 'publisher', 'author', 'image', 'datePublished', 'dateModified', 'keywords', 'breadcrumb', 'mainEntity'];
 const SCHEMA_ORG = {
-  Organization: ['@type', '@id', 'name', 'url', 'logo', 'sameAs'],
+  Organization: ['@type', '@id', 'name', 'url', 'logo', 'sameAs', 'contactPoint'],
+  ContactPoint: ['@type', 'contactType', 'email', 'url'],
   WebSite: ['@type', '@id', 'url', 'name', 'description', 'inLanguage', 'publisher'],
   WebPage: CREATIVE_WORK,
   TechArticle: CREATIVE_WORK,
   FAQPage: CREATIVE_WORK,
+  AboutPage: [...CREATIVE_WORK, 'about'],
+  HowTo: [...CREATIVE_WORK, 'step'],
+  HowToStep: ['@type', 'position', 'name', 'text', 'url'],
   Question: ['@type', 'name', 'acceptedAnswer'],
   Answer: ['@type', 'text'],
   BreadcrumbList: ['@type', '@id', 'itemListElement'],
   ListItem: ['@type', 'position', 'name', 'item'],
   Offer: ['@type', 'price', 'priceCurrency'],
-  'SoftwareApplication,SoftwareSourceCode': ['@type', '@id', 'name', 'description', 'url', 'image', 'applicationCategory', 'operatingSystem', 'runtimePlatform', 'programmingLanguage', 'codeRepository', 'license', 'softwareVersion', 'downloadUrl', 'isAccessibleForFree', 'offers', 'publisher', 'author'],
+  SoftwareApplication: ['@type', '@id', 'name', 'description', 'url', 'image', 'applicationCategory', 'operatingSystem', 'license', 'softwareVersion', 'downloadUrl', 'installUrl', 'isAccessibleForFree', 'offers', 'publisher', 'author'],
+  SoftwareSourceCode: ['@type', '@id', 'name', 'codeRepository', 'programmingLanguage', 'runtimePlatform', 'license', 'targetProduct', 'publisher', 'author'],
 };
 
 function htmlFiles(dir) {
@@ -96,11 +101,11 @@ test('site builds; links, metadata and structured data are complete', async t =>
   t.after(() => fs.rmSync(outDir, {recursive: true, force: true}));
   const {pages} = await build({outDir});
 
-  for (const url of ['/', '/docs/getting-started/', '/docs/registry/', '/docs/languages/node/', '/languages/node/', '/faq/', '/brand/', '/compare/', '/schema/', '/projects/']) {
+  for (const url of ['/', '/docs/getting-started/', '/docs/registry/', '/docs/languages/node/', '/languages/node/', '/faq/', '/brand/', '/compare/', '/schema/', '/projects/', '/install/', '/install/github-action/', '/install/binary/', '/install/npm/', '/install/docker/', '/install/helm/', '/install/ansible/', '/checks/', '/attestium/', '/about/']) {
     assert.ok(pages.includes(url), `${url} is not built`);
   }
 
-  for (const file of ['404.html', 'sitemap.xml', 'robots.txt', 'llms.txt', 'llms-full.txt', 'manifest.webmanifest', 'style.css', 'site.js', 'favicon.svg', 'og.png', 'icon-512.png', 'brand/logo.svg', 'schema/attester.schema.json', 'schema/verifier.schema.json', 'schema/registry.schema.json', 'schema/report.schema.json', 'schema/report.example.json']) {
+  for (const file of ['404.html', 'sitemap.xml', 'robots.txt', '.well-known/security.txt', 'fonts/ibm-plex-sans-latin.woff2', 'fonts/OFL.txt', 'img/forward-email.svg', 'llms.txt', 'llms-full.txt', 'manifest.webmanifest', 'style.css', 'site.js', 'favicon.svg', 'og.png', 'icon-512.png', 'brand/logo.svg', 'schema/attester.schema.json', 'schema/verifier.schema.json', 'schema/registry.schema.json', 'schema/report.schema.json', 'schema/report.example.json']) {
     assert.ok(fs.existsSync(path.join(outDir, file)), `${file} is missing`);
   }
 
@@ -454,5 +459,89 @@ test('every page has a Content-Security-Policy that allows what it loads, and no
     for (const [, src] of html.matchAll(/<img[^>]*\ssrc="([^"]+)"/g)) {
       assert.ok(allows('img-src', /^https?:/.test(src) ? src : '/'), `${where}: image ${src} is not allowed`);
     }
+  }
+});
+
+test('crawlers, agents and readers find what they need', async t => {
+  const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'site-agents-'));
+  t.after(() => fs.rmSync(outDir, {recursive: true, force: true}));
+  const {pages} = await build({outDir});
+  const read = file => fs.readFileSync(path.join(outDir, file), 'utf8');
+  const page = url => read(path.join(url, 'index.html'));
+  const graph = html => JSON.parse(/<script type="application\/ld\+json">([^<]+)<\/script>/.exec(html)[1])['@graph'];
+
+  // Robots.txt names the AI and answer-engine crawlers, and allows them everything.
+  const robots = read('robots.txt');
+  for (const agent of ['GPTBot', 'OAI-SearchBot', 'ChatGPT-User', 'ClaudeBot', 'Claude-User', 'Claude-SearchBot', 'PerplexityBot', 'Perplexity-User', 'Google-Extended', 'Applebot-Extended', 'CCBot', 'Bingbot', 'DuckAssistBot', 'meta-externalagent']) {
+    assert.match(robots, new RegExp(`^User-agent: ${agent}\\nAllow: /$`, 'm'), agent);
+  }
+
+  // Security.txt (RFC 9116): a contact, an expiry in the future, and its own URL.
+  const security = read('.well-known/security.txt');
+  assert.match(security, /^Contact: mailto:\S+@\S+$/m);
+  assert.match(security, /^Contact: https:\/\/\S+$/m);
+  const expires = /^Expires: (\S+)$/m.exec(security);
+  assert.ok(expires && Date.parse(expires[1]) > Date.now(), 'security.txt expires in the future');
+  assert.match(security, new RegExp(`^Canonical: ${SITE}/.well-known/security.txt$`, 'm'));
+
+  // Llms.txt lists the install guides and the project pages, each with its Markdown copy.
+  const llms = read('llms.txt');
+  for (const url of ['/install/', '/install/github-action/', '/install/binary/', '/install/npm/', '/install/docker/', '/install/helm/', '/install/ansible/', '/checks/', '/attestium/', '/about/']) {
+    assert.ok(pages.includes(url), `${url} is not built`);
+    assert.ok(llms.includes(`](${SITE}${url}index.md): `), `llms.txt does not list ${url}`);
+    const markdown = read(path.join(url, 'index.md'));
+    assert.match(markdown, /^# .+\n\n\S/, `${url}index.md`);
+    assert.ok(read('llms-full.txt').includes(`<!-- ${SITE}${url} -->`), `llms-full.txt leaves out ${url}`);
+    // Enough text to answer a question, not a stub.
+    const words = markdown.replaceAll(/```[\s\S]*?```/g, '').split(/\s+/).length;
+    assert.ok(words > 300, `${url} has ${words} words`);
+  }
+
+  // Each install guide is a how-to whose steps are its numbered sections.
+  for (const url of ['/install/github-action/', '/install/binary/', '/install/npm/', '/install/docker/', '/install/helm/', '/install/ansible/']) {
+    const html = page(url);
+    const howto = graph(html).find(node => node['@type'] === 'HowTo');
+    assert.ok(howto && howto.step.length >= 3, `${url} has no HowTo steps`);
+    const headings = [...html.matchAll(/<h2 id="(\d+-[^"]+)">/g)].map(match => match[1]);
+    assert.deepEqual(howto.step.map(step => step.url), headings.map(id => `${SITE}${url}#${id}`), url);
+    assert.ok(howto.step.every((step, index) => step.position === index + 1 && step.name && step.text), url);
+    // Breadcrumbs: home, the install hub, the page.
+    const crumbs = graph(html).find(node => node['@type'] === 'BreadcrumbList').itemListElement.map(item => item.item);
+    assert.deepEqual(crumbs, [`${SITE}/`, `${SITE}/install/`, `${SITE}${url}`], url);
+    assert.match(html, /<a href="\/install\/" aria-current="page">Install<\/a>/, `${url}: Install is not the current section`);
+  }
+
+  // The FAQ's structured data holds the questions the page shows.
+  const faq = page('/faq/');
+  const questions = graph(faq).find(node => node['@type'] === 'FAQPage').mainEntity.map(item => item.name);
+  assert.ok(questions.length > 10);
+  const decode = text => text.replaceAll(/<[^>]*>/g, '').replaceAll('&#39;', '\'').replaceAll('&quot;', '"').replaceAll('&lt;', '<').replaceAll('&gt;', '>').replaceAll('&amp;', '&');
+  const shown = [...faq.matchAll(/<h2 id="[^"]+">([\s\S]*?)<a class="h-anchor"/g)].map(match => decode(match[1]));
+  assert.deepEqual(questions, shown);
+
+  assert.ok(graph(page('/about/')).some(node => node['@type'] === 'AboutPage'));
+
+  // Nothing is loaded from another site but the live status badges.
+  for (const file of htmlFiles(outDir)) {
+    const html = fs.readFileSync(file, 'utf8');
+    const where = path.relative(outDir, file);
+    for (const [tag] of html.matchAll(/<(?:link|script|img)\s[^>]*>/g)) {
+      if (/rel="(?:canonical|alternate)"/.test(tag)) {
+        continue;
+      }
+
+      const url = /\s(?:src|href)="(https?:[^"]+)"/.exec(tag);
+      assert.ok(!url || url[1].startsWith('https://img.shields.io/'), `${where} loads ${url && url[1]}`);
+    }
+
+    const title = /<title>([^<]+)<\/title>/.exec(html)[1];
+    assert.ok(title.length <= 70, `${where}: title "${title}" is ${title.length} characters`);
+    assert.doesNotMatch(title, /—/, `${where}: title has an em dash`);
+  }
+
+  // The stylesheet's fonts are this site's own files.
+  const css = read('style.css');
+  for (const [, url] of css.matchAll(/url\('([^']+)'\)/g)) {
+    assert.ok(url.startsWith('/') && fs.existsSync(path.join(outDir, url)), `style.css: ${url}`);
   }
 });

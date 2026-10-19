@@ -1,7 +1,8 @@
 <!--
-title: Frequently asked questions
-description: Answers about Audit Status: what it verifies, TPM requirements, languages, PM2, containers, Kubernetes, root on the server, Keylime and SLSA, and cost.
+title: Audit Status FAQ: verification, install and security
+description: Answers about Audit Status: what it verifies, installing it, Docker, TPMs, languages, PM2, Kubernetes, root on the server, Attestium, Keylime and cost.
 label: FAQ
+kind: faq
 keywords: audit status faq, verify production code, remote attestation questions, tpm required, pm2, kubernetes
 -->
 
@@ -25,6 +26,31 @@ Yes, through the [public registry](/docs/registry/). Install the attester on you
 ## What is remote attestation?
 
 A verifier checks what another machine runs without trusting that machine's own opinion. The attester on the server reports facts; the verifier checks that the report is fresh and unchanged and compares every fact with outside references. Audit Status is built on [Attestium](https://attestium.com), which defines the evidence format.
+
+
+## How do I install Audit Status?
+
+Install the attester on each server and a verifier somewhere else. Servers run the release binary, installed by hand, with `install.sh`, with the Ansible role, or as a DaemonSet with the Helm chart. The verifier runs as a GitHub Action or with `auditstatus verify` from npm. [Install](/install/) compares every method.
+
+
+## Is there a Docker image?
+
+Yes, `ghcr.io/auditstatus/attester`, for `linux/amd64` and `linux/arm64`. It holds the release binary, `crictl` and `tpm2-tools`, and the Helm chart runs it on every Kubernetes node. On a server that runs Docker without Kubernetes, install the release binary on the host so it can see every container. See [Docker](/install/docker/).
+
+
+## Which operating systems are supported?
+
+Audited servers run Linux, on x64 or arm64: the attester reads each process through `/proc`. Releases also include a macOS arm64 binary for the command line tool, and the npm package runs wherever Node.js 18 or later runs. System packages are checked against the Debian and Ubuntu archives.
+
+
+## What leaves my servers?
+
+Paths and SHA-256 hashes of files, never their contents, plus facts about packages, processes and containers. Environment values stay on the server. Command lines reach the verifier but never the published report. See [What leaves the server](/docs/threat-model/#what-leaves-the-server-and-what-is-published).
+
+
+## How does Audit Status relate to Attestium?
+
+Attestium is the open evidence format and the Node.js library that collects and checks evidence. Audit Status is the ready-made attester, verifier, GitHub Action and public registry built on it. An attester or verifier in another language interoperates by following the Attestium specification. See [Audit Status and Attestium](/attestium/).
 
 
 ## Does it need a TPM?

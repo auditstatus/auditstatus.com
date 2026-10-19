@@ -1,5 +1,5 @@
 <!--
-title: Audit Status compared with Keylime, System Transparency, SLSA and Sigstore
+title: Compare Audit Status with Keylime, SLSA and Sigstore
 description: How Audit Status relates to Keylime, System Transparency, SLSA provenance and Sigstore: what each checks, where they overlap, and how they combine.
 label: Compare
 keywords: Keylime alternative, System Transparency, SLSA provenance, Sigstore, remote attestation comparison, runtime verification tools

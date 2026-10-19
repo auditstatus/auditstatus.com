@@ -26,16 +26,17 @@ const SITE = {
   url: 'https://auditstatus.com',
   repo: 'https://github.com/auditstatus/auditstatus.com',
   branch: 'main',
-  tagline: 'Verify what your servers run',
+  tagline: 'verify production runs the public code',
   description: 'Audit Status verifies that production servers run exactly the code in a public repository, and publishes a report and a badge.',
   keywords: 'remote attestation, production verification, open source transparency, supply chain security, TPM, status page, CI',
   locale: 'en_US',
   themeLight: '#fbf7ef',
   themeDark: '#0e1b1b',
   imageAlt: 'Audit Status: verify that production runs the public code',
-  fonts: 'https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@500;600&display=swap',
-  // The Latin subset of IBM Plex Sans that the stylesheet above serves: headings and the wordmark.
-  fontPreload: 'https://fonts.gstatic.com/s/ibmplexsans/v23/zYXzKVElMYYaJe8bpLHnCwDKr932-G7dytD-Dmu1syxeKYY.woff2',
+  // The Latin subset of IBM Plex Sans (site/fonts/): headings and the wordmark.
+  fontPreload: '/fonts/ibm-plex-sans-latin.woff2',
+  // Security reports go to Forward Email, which runs the project.
+  security: 'https://forwardemail.net/security',
 };
 
 const PUBLISHER = {
@@ -43,12 +44,20 @@ const PUBLISHER = {
   '@id': 'https://forwardemail.net/#organization',
   name: 'Forward Email',
   url: 'https://forwardemail.net',
-  logo: 'https://forwardemail.net/img/logo-square.svg',
-  sameAs: ['https://github.com/forwardemail'],
+  logo: 'https://forwardemail.net/img/logo-square-180x180.png',
+  // Profiles Forward Email lists in its own structured data.
+  sameAs: ['https://github.com/forwardemail', 'https://x.com/fwdemail', 'https://www.reddit.com/r/forwardemail/', 'https://www.youtube.com/forwardemail'],
+  contactPoint: {
+    '@type': 'ContactPoint', contactType: 'security', email: 'security@forwardemail.net', url: 'https://forwardemail.net/security',
+  },
 };
 
-// Guides in site/pages/, in this order; faq.md is the FAQ page.
+// Pages in site/pages/, in this order. Guides are the use cases; install.md
+// is the hub of the install guides in site/pages/install/; the project pages
+// describe Audit Status itself. faq.md is the FAQ page.
 const GUIDES = ['verify-production-matches-source', 'open-source-transparency', 'kubernetes-attestation', 'runtime-integrity-monitoring', 'compare'];
+const INSTALL = ['install', 'install/github-action', 'install/binary', 'install/npm', 'install/docker', 'install/helm', 'install/ansible'];
+const PROJECT = ['checks', 'attestium', 'about'];
 
 const NAV = [
   {group: 'Start', pages: [['docs/README.md', 'Overview'], ['docs/registry.md', 'Public registry'], ['docs/getting-started.md'], ['docs/how-it-works.md']]},
@@ -59,6 +68,36 @@ const NAV = [
   },
   {group: 'Reference', pages: [['docs/reports.md'], ['docs/threat-model.md'], ['docs/adopters.md']]},
 ];
+
+// Page titles for the documents, for search results and link previews: what
+// each page covers, where its own heading is one word.
+const DOC_TITLES = {
+  'docs/README.md': 'Audit Status documentation: guides and reference',
+  'docs/registry.md': 'Public registry: hourly server verification',
+  'docs/getting-started.md': 'Getting started: run your own verifier',
+  'docs/how-it-works.md': 'How it works: attester, verifier, evidence',
+  'docs/attester.md': 'Attester: install, permissions and SSH',
+  'docs/verifier.md': 'Verifier: GitHub Action, reports and badge',
+  'docs/configuration.md': 'Configuration reference for every setting',
+  'docs/containers.md': 'Containers: compare with images by digest',
+  'docs/kubernetes.md': 'Kubernetes: Helm chart and port-forward',
+  'docs/hardware.md': 'TPM, IMA and confidential VM evidence',
+  'docs/monitor.md': 'Monitor: record what runs between audits',
+  'docs/reports.md': 'Reports: statuses and findings explained',
+  'docs/threat-model.md': 'Threat model: what each evidence level proves',
+  'docs/adopters.md': 'Adopters: publish results on a status page',
+  'docs/languages/README.md': 'Languages and lockfiles Audit Status verifies',
+  'docs/languages/node.md': 'Node.js guide: lockfiles, PM2 and runtimes',
+  'docs/languages/python.md': 'Python guide: venvs, uv, Poetry and pip',
+  'docs/languages/ruby.md': 'Ruby guide: Bundler and Gemfile.lock',
+  'docs/languages/elixir.md': 'Elixir guide: Mix, Hex and mix.lock',
+  'docs/languages/php.md': 'PHP guide: Composer and composer.lock',
+  'docs/languages/java.md': 'Java guide: Gradle and Maven dependencies',
+  'docs/languages/dotnet.md': '.NET guide: publish output and NuGet',
+  'docs/languages/go.md': 'Go guide: binaries checked against go.sum',
+  'docs/languages/rust.md': 'Rust guide: cargo-auditable and Cargo.lock',
+  'docs/languages/binaries.md': 'Releases and binaries: attested manifests',
+};
 
 // Glossary: the first use of each term on a docs page gets a tooltip.
 // [pattern, definition, regular expression flags]
@@ -107,21 +146,30 @@ function jsonForScript(value) {
 const THEME_SCRIPT = 'try{var t=localStorage.getItem(\'theme\');if(t===\'light\'||t===\'dark\')document.documentElement.dataset.theme=t}catch(e){}';
 
 // Content-Security-Policy: scripts from this site and the theme script (by
-// hash), styles and fonts from this site and Google Fonts.  Inline style
-// attributes stay allowed (colour swatches, table alignment).
+// hash), styles and fonts from this site only.  Inline style attributes stay
+// allowed (colour swatches, table alignment).  The only images from
+// elsewhere are the live status badges on the projects page.
 function contentSecurityPolicy() {
   const hash = crypto.createHash('sha256').update(THEME_SCRIPT).digest('base64');
   return [
     'default-src \'none\'',
     `script-src 'self' 'sha256-${hash}'`,
-    'style-src \'self\' \'unsafe-inline\' https://fonts.googleapis.com',
-    'font-src https://fonts.gstatic.com',
-    'img-src \'self\' https://forwardemail.net https://img.shields.io',
+    'style-src \'self\' \'unsafe-inline\'',
+    'font-src \'self\'',
+    'img-src \'self\' https://img.shields.io',
     'manifest-src \'self\'',
+    // Same-origin fetches only: crawlers and audit tools read robots.txt and
+    // llms.txt from the page.
+    'connect-src \'self\'',
     'base-uri \'none\'',
     'form-action \'none\'',
     'upgrade-insecure-requests',
   ].join('; ');
+}
+
+// A page title: the page's name, then the site's.
+function pageTitle(name) {
+  return name.includes(SITE.name) ? name : `${name} | ${SITE.name}`;
 }
 
 function stripTags(html) {
@@ -308,8 +356,8 @@ function renderMarkdown(markdown, source, pages) {
         return codeBlock(text, (lang || '').split(/\s/)[0].toLowerCase());
       },
       table(token) {
-        const cell = (c, tag) => `<${tag}${c.align ? ` style="text-align:${c.align}"` : ''}>${this.parser.parseInline(c.tokens)}</${tag}>`;
-        const head = token.header.map(c => cell(c, 'th')).join('');
+        const cell = (c, tag, attributes = '') => `<${tag}${attributes}${c.align ? ` style="text-align:${c.align}"` : ''}>${this.parser.parseInline(c.tokens)}</${tag}>`;
+        const head = token.header.map(c => cell(c, 'th', ' scope="col"')).join('');
         const rows = token.rows.map(row => `<tr>${row.map(c => cell(c, 'td')).join('')}</tr>`).join('\n');
         const headless = token.header.every(c => c.text.trim() === '');
         return `<div class="table-wrap"><table${headless ? ' class="no-head"' : ''}>${headless ? '' : `<thead><tr>${head}</tr></thead>`}<tbody>${rows}</tbody></table></div>\n`;
@@ -402,7 +450,8 @@ function structuredData(p) {
     '@id': `${SITE.url}/#website`,
     url: `${SITE.url}/`,
     name: SITE.name,
-    description: SITE.description,
+    // The description is the home page's text; other pages describe themselves.
+    ...(p.kind === 'home' ? {description: SITE.description} : {}),
     inLanguage: 'en',
     publisher: {'@id': PUBLISHER['@id']},
   };
@@ -420,6 +469,7 @@ function structuredData(p) {
     '@type': type,
     '@id': `${url}#main`,
     url,
+    mainEntityOfPage: url,
     name: p.title,
     headline: p.heading || p.title,
     description: p.description,
@@ -428,6 +478,7 @@ function structuredData(p) {
     publisher: {'@id': PUBLISHER['@id']},
     author: {'@id': PUBLISHER['@id']},
     image,
+    datePublished: p.published,
     dateModified: p.lastmod,
     ...(p.keywords ? {keywords: p.keywords} : {}),
     ...(crumbs ? {breadcrumb: {'@id': crumbs['@id']}} : {}),
@@ -437,7 +488,7 @@ function structuredData(p) {
     case 'home': {
       const {version} = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
       graph.push({
-        '@type': ['SoftwareApplication', 'SoftwareSourceCode'],
+        '@type': 'SoftwareApplication',
         '@id': `${SITE.url}/#software`,
         name: SITE.name,
         description: SITE.description,
@@ -445,14 +496,23 @@ function structuredData(p) {
         image,
         applicationCategory: 'DeveloperApplication',
         operatingSystem: 'Linux',
-        runtimePlatform: 'Node.js 18 or later, or the single-file release binary',
-        programmingLanguage: 'JavaScript',
-        codeRepository: SITE.repo,
         license: 'https://opensource.org/licenses/MIT',
         softwareVersion: version,
         downloadUrl: `${SITE.repo}/releases`,
+        installUrl: `${SITE.url}/install/`,
         isAccessibleForFree: true,
         offers: {'@type': 'Offer', price: '0', priceCurrency: 'USD'},
+        publisher: {'@id': PUBLISHER['@id']},
+        author: {'@id': PUBLISHER['@id']},
+      }, {
+        '@type': 'SoftwareSourceCode',
+        '@id': `${SITE.url}/#source`,
+        name: `${SITE.name} source code`,
+        codeRepository: SITE.repo,
+        programmingLanguage: 'JavaScript',
+        runtimePlatform: 'Node.js 18 or later, or the single-file release binary',
+        license: 'https://opensource.org/licenses/MIT',
+        targetProduct: {'@id': `${SITE.url}/#software`},
         publisher: {'@id': PUBLISHER['@id']},
         author: {'@id': PUBLISHER['@id']},
       });
@@ -464,6 +524,23 @@ function structuredData(p) {
     case 'guide':
     case 'language': {
       graph.push(article('TechArticle'));
+
+      break;
+    }
+
+    case 'howto': {
+      graph.push({
+        ...article('HowTo'),
+        step: p.steps.map((step, index) => ({
+          '@type': 'HowToStep', position: index + 1, name: step.name, text: step.text, url: `${url}#${step.id}`,
+        })),
+      });
+
+      break;
+    }
+
+    case 'about': {
+      graph.push({...article('AboutPage'), about: {'@id': `${SITE.url}/#software`}});
 
       break;
     }
@@ -502,6 +579,7 @@ function head(p, assets) {
 <meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="${esc(contentSecurityPolicy())}">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="strict-origin-when-cross-origin">
 <title>${esc(p.title)}</title>
 ${meta('description', p.description)}
 ${p.keywords ? meta('keywords', p.keywords) : ''}
@@ -509,6 +587,7 @@ ${p.kind === 'error' ? meta('robots', 'noindex') : ''}
 <link rel="canonical" href="${url}">
 ${p.markdown ? `<link rel="alternate" type="text/markdown" href="${url}index.md" title="Markdown">` : ''}
 ${property('og:type', p.kind === 'home' ? 'website' : 'article')}
+${p.kind === 'home' || p.kind === 'error' ? '' : `${property('article:published_time', p.published)}\n${property('article:modified_time', p.lastmod)}`}
 ${property('og:site_name', SITE.name)}
 ${property('og:locale', SITE.locale)}
 ${property('og:title', p.title)}
@@ -517,6 +596,7 @@ ${property('og:url', url)}
 ${property('og:image', image)}
 ${property('og:image:width', '1200')}
 ${property('og:image:height', '630')}
+${property('og:image:type', 'image/png')}
 ${property('og:image:alt', SITE.imageAlt)}
 ${meta('twitter:card', 'summary_large_image')}
 ${meta('twitter:title', p.title)}
@@ -531,10 +611,7 @@ ${meta('twitter:image:alt', SITE.imageAlt)}
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="manifest" href="/manifest.webmanifest">
 <script>${THEME_SCRIPT}</script>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="preload" href="${SITE.fontPreload}" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="${SITE.fonts}">
 <link rel="stylesheet" href="/style.css?v=${assets.css}">
 <script src="/site.js?v=${assets.js}" defer></script>
 <script type="application/ld+json">${structuredData(p)}</script>
@@ -549,6 +626,7 @@ function header(active) {
 ${brandLink()}
 <nav class="site-nav" id="site-nav" aria-label="Main">
 <ul>
+${link('/install/', 'Install', 'install')}
 ${link('/docs/', 'Docs', 'docs')}
 ${link('/docs/languages/', 'Languages', 'languages')}
 ${link('/docs/reports/', 'Reports', 'reports')}
@@ -563,7 +641,7 @@ ${link('/docs/reports/', 'Reports', 'reports')}
 </header>`;
 }
 
-function footer(guides) {
+function footer({guides, installs}) {
   const list = (id, title, links) => `<nav aria-labelledby="${id}"><h2 id="${id}">${title}</h2><ul>${links.map(([href, label]) => `<li><a href="${href}"${href.startsWith('http') ? ' rel="noopener"' : ''}>${label}</a></li>`).join('')}</ul></nav>`;
   return `<footer class="site-footer">
 <div class="wrap footer-grid">
@@ -571,11 +649,11 @@ function footer(guides) {
 ${brandLink()}
 <p>Remote attestation of what your servers run. <a href="${SITE.repo}/blob/${SITE.branch}/LICENSE" rel="noopener">MIT license</a>.</p>
 </div>
-${list('f-docs', 'Documentation', [['/docs/getting-started/', 'Getting started'], ['/docs/how-it-works/', 'How it works'], ['/docs/configuration/', 'Configuration'], ['/docs/threat-model/', 'Threat model'], ['/faq/', 'FAQ']])}
-${list('f-guides', 'Use cases', guides.filter(g => g.url !== '/compare/').map(g => [g.url, g.label]))}
-${list('f-compare', 'Compare', [['/compare/#keylime', 'Keylime'], ['/compare/#system-transparency', 'System Transparency'], ['/compare/#slsa-provenance', 'SLSA provenance'], ['/compare/#sigstore', 'Sigstore']])}
-${list('f-project', 'Project', [[SITE.repo, 'GitHub'], [`${SITE.repo}/releases`, 'Releases'], ['/projects/', 'Verified projects'], ['/schema/', 'JSON Schemas'], ['/brand/', 'Brand'], ['https://forwardemail.net/security', 'Security']])}
-${list('f-related', 'Related', [['https://attestium.com', 'Attestium'], ['https://forwardemail.net', 'Forward Email'], ['https://status.forwardemail.net', 'Forward Email status']])}
+${list('f-docs', 'Documentation', [['/docs/getting-started/', 'Getting started'], ['/docs/how-it-works/', 'How it works'], ['/checks/', 'What it checks'], ['/docs/configuration/', 'Configuration'], ['/docs/threat-model/', 'Threat model'], ['/faq/', 'FAQ']])}
+${list('f-install', 'Install', installs.map(g => [g.url, g.label]))}
+${list('f-guides', 'Use cases', guides.map(g => [g.url, g.label]))}
+${list('f-project', 'Project', [['/about/', 'About'], ['/about/#how-do-you-reach-the-team', 'Contact'], ['/about/#what-does-this-website-collect', 'Privacy'], [SITE.repo, 'GitHub'], [`${SITE.repo}/releases`, 'Releases'], ['/projects/', 'Verified projects'], ['/schema/', 'JSON Schemas'], ['/brand/', 'Brand'], [SITE.security, 'Security'], ['/llms.txt', 'llms.txt for AI agents']])}
+${list('f-related', 'Related', [['/attestium/', 'Audit Status and Attestium'], ['https://attestium.com', 'Attestium'], ['https://forwardemail.net', 'Forward Email'], ['https://status.forwardemail.net', 'Forward Email status']])}
 </div>
 </footer>`;
 }
@@ -585,7 +663,7 @@ function render(p, context) {
 <body class="page-${p.kind}">
 ${header(p.active)}
 ${p.body}
-${footer(context.guides)}
+${footer(context)}
 </body>
 </html>
 `;
@@ -985,12 +1063,12 @@ ${row
 </main>
 <div class="toc toc-empty"></div>
 </div>`;
-  const description = truncate(`How Audit Status verifies ${slug === 'binaries' ? 'compiled and bundled releases' : `${name} deployments`}: ${plain(row ? `${row.verified}, compared with ${row.reference}` : lede)}.`.replace(/\.\.$/, '.'), 158);
+  const description = truncate(`How Audit Status verifies ${slug === 'binaries' ? 'compiled and bundled releases' : `${name} deployments`}: ${plain(row ? `${row.verified}, compared with ${row.reference}` : lede)}.`.replace(/\.\.$/, '.'), 150);
   return {
     url,
     kind: 'language',
     active: 'languages',
-    title: `${heading} — ${SITE.name}`,
+    title: pageTitle(heading),
     heading,
     label: name,
     description,
@@ -1032,7 +1110,7 @@ ${codeBlock('# yaml-language-server: $schema=https://auditstatus.com/schema/veri
     url: '/schema/',
     kind: 'page',
     active: 'docs',
-    title: `JSON Schemas — ${SITE.name}`,
+    title: pageTitle('JSON Schemas for configuration and reports'),
     heading: 'JSON Schemas',
     description: 'JSON Schemas for the Audit Status attester and verifier configuration files and for report.json, with editor support through the YAML language server.',
     sources: ['lib/config.js', 'lib/registry.js', 'site/schema/report.schema.json'],
@@ -1056,7 +1134,7 @@ function projectsPage() {
       .filter(Boolean).map(repository => repository.url.replace(/\.git$/, '')))];
     const description = raw.project.description ? `<br><span class="muted">${esc(raw.project.description)}</span>` : '';
     const sources = repositories.map(url => `<a href="${esc(url)}">${esc(url.replace(/^https:\/\/(?:github\.com\/)?/, ''))}</a>`).join('<br>');
-    const badge = `<a href="${esc(registry.links.report(slug))}"><img src="${esc(registry.links.badge(slug))}" alt="${esc(raw.project.name)}: audit status" width="220" height="20" style="object-fit:contain;object-position:left center" loading="lazy"></a>`;
+    const badge = `<a class="badge-link" href="${esc(registry.links.report(slug))}"><img src="${esc(registry.links.badge(slug))}" alt="${esc(raw.project.name)}: audit status" width="220" height="20" style="object-fit:contain;object-position:left center"></a>`;
     return `<tr><td><a href="${esc(raw.project.url)}">${esc(raw.project.name)}</a>${description}</td><td>${sources}</td><td>${badge}</td><td><a href="${SITE.repo}/blob/${SITE.branch}/registry/${slug}.yml"><code>${slug}.yml</code></a></td></tr>`;
   });
   const body = `<div class="wrap guide">
@@ -1069,6 +1147,12 @@ function projectsPage() {
 ${rows.join('\n') || '<tr><td colspan="4">No project is in the registry yet.</td></tr>'}
 </tbody></table></div>
 <p>Every result as JSON: <a href="https://raw.githubusercontent.com/${registry.REPOSITORY}/${registry.STATUS_BRANCH}/index.json"><code>index.json</code></a> on the <a href="${SITE.repo}/tree/${registry.STATUS_BRANCH}"><code>${registry.STATUS_BRANCH}</code> branch</a>, which the registry's workflow writes each hour.</p>
+<h2 id="what-the-badge-says">What does each badge say?</h2>
+<p>Each badge is a Shields.io endpoint that reads the project's <code>badge.json</code> on the status branch, which the hourly run rewrites with its report. A server's status is the worst of its findings, and a project's status is the worst of its servers.</p>
+<ul>
+${Object.keys(STATUS).map(key => `<li><strong>${STATUS[key][0]}</strong>: ${STATUS[key][1]}</li>`).join('\n')}
+</ul>
+<p>A passing badge also names the evidence of its least-backed server, for example <code>passing, software evidence</code> or <code>passing, TPM + IMA</code>, so it never claims more than every server showed. Software evidence holds against mistakes, drift and attackers without root, and root on the server can forge it. See <a href="/docs/how-it-works/#evidence-levels">Evidence levels</a> and <a href="/docs/reports/">Reports</a>.</p>
 <h2 id="add-yours">Add yours</h2>
 <p>One YAML file in <code>registry/</code> and Audit Status's SSH key on your servers. Nothing runs in your CI. See <a href="/docs/registry/#add-your-project">Add your project</a>.</p>
 </article>
@@ -1079,10 +1163,10 @@ ${rows.join('\n') || '<tr><td colspan="4">No project is in the registry yet.</td
     url: '/projects/',
     kind: 'page',
     active: 'docs',
-    title: `Verified projects — ${SITE.name}`,
+    title: pageTitle('Verified projects'),
     heading: 'Verified projects',
     description: 'Open-source projects whose production servers Audit Status verifies every hour from GitHub Actions, with their live status badges and signed reports.',
-    sources: ['registry', 'lib/registry.js'],
+    sources: ['registry', 'lib/registry.js', 'docs/verifier.md'],
     crumbs: [{name: SITE.name, url: '/'}, {name: 'Verified projects', url: '/projects/'}],
     markdown: null,
     body,
@@ -1129,12 +1213,14 @@ const LEVELS = [
   ['AMD SEV-SNP, Intel TDX', 'A confidential VM report signed by the CPU vendor.', 'Protects against the host operator, not against root in the guest.', 3],
 ];
 
-// [title, text, document]
+// [title, text, page, link text]
 const DEPLOY = [
-  ['SSH and one binary', 'Install the release binary on each server. The verifier connects with a key restricted to a forced command that can only run the attester.', 'docs/attester.md#the-ssh-forced-command'],
-  ['Ansible', 'A role installs the attester, its account, configuration and SSH key the same way on every server.', 'docs/attester.md#the-ansible-role'],
-  ['Kubernetes', 'A Helm chart runs the attester as a DaemonSet. The verifier reaches it through port-forward: no Service, no open port.', 'docs/kubernetes.md#the-helm-chart'],
-  ['GitHub Action', 'The verifier runs on a schedule, writes the report to the job summary, publishes it to a branch and manages an issue.', 'docs/verifier.md#the-github-action'],
+  ['GitHub Action', 'The verifier runs on a schedule in your repository, writes the report to the job summary, publishes it to a branch and opens an issue when a server does not pass.', '/install/github-action/', 'Set up the GitHub Action'],
+  ['Release binary', 'One executable for Linux x64, Linux arm64 and macOS arm64, checked against SHA256SUMS. Servers run it as the attester, behind an SSH forced command.', '/install/binary/', 'Install the release binary'],
+  ['npm package', 'The command line tool for your own machine or another CI: init, doctor, validate, verify and verify-report, on Node.js 18 or later.', '/install/npm/', 'Install from npm'],
+  ['Docker', 'Containers on Docker, containerd, CRI-O and Podman are compared with their images, fetched by digest. The attester image is on GitHub Container Registry.', '/install/docker/', 'Verify Docker containers'],
+  ['Helm chart', 'Runs the attester as a DaemonSet on every Kubernetes node. The verifier reaches it through port-forward: no Service, no open port.', '/install/helm/', 'Install the Helm chart'],
+  ['Ansible', 'A role installs the attester, its account, configuration and the verifier\'s SSH key the same way on every server.', '/install/ansible/', 'Use the Ansible role'],
 ];
 
 const LEDGER = [
@@ -1160,14 +1246,13 @@ function landing(pages) {
   const registryFile = /```yaml\n([\s\S]*?)```/.exec(readme);
   const {links: registryLinks} = require('../lib/registry');
   const badge = `[![Audit Status](${registryLinks.badge('example')})](${registryLinks.report('example')})`;
-  const link = href => rewriteLink(href, 'README.md', pages);
 
   const ledger = LEDGER.map(([check, text]) => `<li><code>${check}</code><span>${text}</span>${CHECK}</li>`).join('\n');
   const rows = SAMPLE.map(([server, key, level, services, processes, code]) => `<tr><td><code>${server}</code></td><td>${status(key)}</td><td>${level}</td><td class="num">${services}</td><td class="num">${processes}</td><td class="num">${code}</td></tr>`).join('\n');
   const legend = Object.keys(STATUS).map(key => `<li>${term(status(key), STATUS[key][1], `st-tip-${key}`)}</li>`).join('');
   const languages = LANGUAGES.map(([name, lock, href]) => `<li><a href="/languages/${path.basename(href, '.md')}/"><span class="lang-name">${name}</span><span class="lang-lock">${lock}</span></a></li>`).join('\n');
   const levels = LEVELS.map(([name, backed, holds, strength]) => `<tr><th scope="row"><span class="meter" aria-hidden="true">${[1, 2, 3, 4].map(n => `<span${n <= strength ? ' class="on"' : ''}></span>`).join('')}</span>${name}</th><td data-label="Backed by">${backed}</td><td data-label="Holds against root">${holds}</td></tr>`).join('\n');
-  const deploy = DEPLOY.map(([title, text, href]) => `<li><h3>${title}</h3><p>${text}</p><a href="${link(href)}">${title === 'GitHub Action' ? 'The action' : 'Set it up'}<span class="sr-only">: ${title}</span></a></li>`).join('\n');
+  const deploy = DEPLOY.map(([title, text, href, label]) => `<li><h3>${title}</h3><p>${text}</p><a href="${href}">${label}</a></li>`).join('\n');
 
   const body = `<main id="main">
 <section class="hero">
@@ -1226,6 +1311,7 @@ ${codeBlock(badge, '', 'README.md')}
 <div class="report-head"><span class="report-file">report.md</span><span>${status('fail')}<span class="report-sum">2 of 4 servers passed</span></span></div>
 <div class="table-wrap">
 <table>
+<caption class="sr-only">An example report: the status, evidence level and counts for each server</caption>
 <thead><tr><th scope="col">Server</th><th scope="col">Status</th><th scope="col">${term('Evidence', 'The evidence level: software evidence, TPM, TPM + IMA, AMD SEV-SNP or Intel TDX.', 'col-evidence')}</th><th scope="col" class="num">Services</th><th scope="col" class="num">${term('Processes', 'Application processes inspected across the services.', 'col-processes')}</th><th scope="col" class="num">${term('Code explained', 'Executables and libraries that matched a reference, out of all those the processes run or map.', 'col-code')}</th></tr></thead>
 <tbody>
 ${rows}
@@ -1260,6 +1346,7 @@ ${languages}
 </div>
 <div class="table-wrap">
 <table class="levels">
+<caption class="sr-only">Evidence levels, what backs each one, and whether it holds against root on the server</caption>
 <thead><tr><th scope="col">Level</th><th scope="col">Backed by</th><th scope="col">Holds against root on the server</th></tr></thead>
 <tbody>
 ${levels}
@@ -1269,11 +1356,11 @@ ${levels}
 </div>
 </section>
 
-<section class="section" id="deployment" aria-labelledby="deploy-h">
+<section class="section" id="install" aria-labelledby="deploy-h">
 <div class="wrap">
 <div class="section-head">
-<h2 id="deploy-h">Deployment</h2>
-<p>The attester is one executable with no runtime dependencies. It only reads: it never executes what it inspects.</p>
+<h2 id="deploy-h">Install</h2>
+<p>The attester is one executable with no runtime dependencies. It only reads: it never executes what it inspects. The verifier runs in GitHub Actions or anywhere Node.js 18 runs. <a href="/install/">Compare the install methods</a></p>
 </div>
 <ul class="deploy">
 ${deploy}
@@ -1300,7 +1387,7 @@ ${deploy}
 </div>
 </div>
 <div class="credit">
-<a class="credit-logo" href="https://forwardemail.net"><img src="https://forwardemail.net/img/logo-square.svg" width="44" height="44" alt="Forward Email"></a>
+<span class="credit-logo"><img src="/img/forward-email.svg" width="44" height="44" alt="Forward Email logo"></span>
 <p>A project by <a href="https://forwardemail.net">Forward Email</a>, the open-source, privacy-focused email service. <a href="/docs/adopters/">Adopt Audit Status</a></p>
 </div>
 </div>
@@ -1310,19 +1397,21 @@ ${deploy}
   return {
     url: '/',
     kind: 'home',
-    title: `${SITE.name} — ${SITE.tagline}`,
+    title: `${SITE.name}: ${SITE.tagline}`,
     description: SITE.description,
     keywords: SITE.keywords,
     sources: ['README.md', 'docs/verifier.md', 'scripts/build-site.js'],
     body,
-    markdown: null,
+    // The README, for agents: without its title, logos and badges.
+    markdown: markdownCopy(SITE.name, readme.replace(/^# .+\n/, '').split('\n').filter(line => !/^\s*<|^\[!\[/.test(line)).join('\n').replaceAll(/\n{3,}/g, '\n\n'), 'README.md', pages, '/'),
+    group: 'Overview',
   };
 }
 // ---------------------------------------------------------------------------
 // Docs pages
 
 function sidebar(nav, current) {
-  return nav.map(({group, pages}) => `<div class="side-group"><h2>${group}</h2><ul>${pages.map(p => `<li><a href="${p.url}"${p.source === current ? ' aria-current="page"' : ''}>${esc(p.label)}</a></li>`).join('')}</ul></div>`).join('\n');
+  return nav.map(({group, pages}) => `<div class="side-group"><p class="side-title">${group}</p><ul>${pages.map(p => `<li><a href="${p.url}"${p.source === current ? ' aria-current="page"' : ''}>${esc(p.label)}</a></li>`).join('')}</ul></div>`).join('\n');
 }
 
 function tocNav(toc) {
@@ -1376,7 +1465,7 @@ ${tocNav(toc)}
     url: doc.url,
     kind: 'doc',
     active: activeKey(doc.source),
-    title: doc.title.includes(SITE.name) ? doc.title : `${doc.title} — ${SITE.name}`,
+    title: pageTitle(DOC_TITLES[doc.source] || doc.title),
     heading: doc.title,
     description: doc.description,
     sources: [doc.source],
@@ -1395,7 +1484,7 @@ function loadDoc(source, label) {
   const paragraph = body.split(/\n\s*\n/).map(s => s.trim()).find(s => s && !/^[#|`>\-*!<\d]/.test(s)) || SITE.description;
   const titleHtml = titleMatch ? new Marked().parseInline(titleMatch[1]) : esc(title);
   return {
-    source, url: urlFor(source), title, titleHtml, label: label || title, description: truncate(plain(paragraph), 158), body,
+    source, url: urlFor(source), title, titleHtml, label: label || title, description: truncate(plain(paragraph), 140), body,
   };
 }
 
@@ -1433,7 +1522,11 @@ function frontMatter(text) {
   return {data, body: match ? text.slice(match[0].length) : text};
 }
 
-function guidePage(slug, pages, guides) {
+// A page from site/pages/: a guide, an install guide, the FAQ or a page
+// about the project. `section` is the collection it belongs to: its pages
+// are listed beside it, and a page below a hub (install/helm) gets the hub
+// in its breadcrumbs.
+function guidePage(slug, pages, section) {
   const source = `site/pages/${slug}.md`;
   const {data, body: markdown} = frontMatter(fs.readFileSync(path.join(root, source), 'utf8'));
   const titleMatch = /^# (.+)$/m.exec(markdown);
@@ -1441,18 +1534,29 @@ function guidePage(slug, pages, guides) {
   const body = titleMatch ? markdown.slice(titleMatch.index + titleMatch[0].length) : markdown;
   const url = `/${slug}/`;
   const {html, toc} = renderMarkdown(body, source, pages);
-  const faq = slug === 'faq'
-    ? body.split(/^## /m).slice(1).map(section => {
-      const [question, ...rest] = section.split('\n');
-      return {question: question.trim(), answer: stripTags(new Marked().parse(rest.join('\n'))).replaceAll(/\s+/g, ' ').trim()};
-    })
+  const sections = body.split(/^## /m).slice(1).map(text => {
+    const [title, ...rest] = text.split('\n');
+    return {title: title.trim(), html: new Marked().parse(rest.join('\n'))};
+  });
+  const answer = html => stripTags(html).replaceAll(/\s+/g, ' ').trim();
+  const faq = data.kind === 'faq' ? sections.map(s => ({question: s.title, answer: answer(s.html)})) : null;
+  // Numbered sections ("## 1. Install the binary") are the steps of a how-to.
+  const steps = data.kind === 'howto'
+    ? sections.filter(s => /^\d+\.\s/.test(s.title)).map(s => ({
+      name: plain(s.title.replace(/^\d+\.\s+/, '')), text: truncate(answer(s.html.split(/<\/p>/)[0]), 300), id: slugify(stripTags(new Marked().parseInline(s.title))),
+    }))
     : null;
-  const related = guides.filter(g => g.url !== url);
-  const aside = `<aside class="related" aria-labelledby="related-h"><h2 id="related-h">${slug === 'faq' ? 'Guides' : 'More guides'}</h2><ul>${related.map(g => `<li><a href="${g.url}">${esc(g.label)}</a><span>${esc(g.description)}</span></li>`).join('')}</ul></aside>`;
   const label = data.label || heading;
+  const hub = section.hub && section.hub.url !== url ? section.hub : null;
+  const related = section.items.filter(g => g.url !== url);
+  const aside = related.length > 0
+    ? `<aside class="related" aria-labelledby="related-h"><h2 id="related-h">${esc(section.title)}</h2><ul>${related.map(g => `<li><a href="${g.url}">${esc(g.label)}</a><span>${esc(g.description)}</span></li>`).join('')}</ul></aside>`
+    : '';
+  const crumbs = [{name: SITE.name, url: '/'}, ...(hub ? [{name: hub.label, url: hub.url}] : []), {name: label, url}];
+  const crumbHtml = crumbs.map((crumb, index) => (index === crumbs.length - 1 ? `<li><span aria-current="page">${esc(crumb.name)}</span></li>` : `<li><a href="${crumb.url}">${esc(crumb.name)}</a></li>`)).join('');
   const bodyHtml = `<div class="wrap guide">
 <main id="main" class="doc">
-<nav class="crumbs" aria-label="Breadcrumb"><ol><li><a href="/">${SITE.name}</a></li><li><span aria-current="page">${esc(label)}</span></li></ol></nav>
+<nav class="crumbs" aria-label="Breadcrumb"><ol>${crumbHtml}</ol></nav>
 <article class="prose">
 <h1>${esc(heading)}</h1>
 ${addGlossary(html, 'g')}
@@ -1464,18 +1568,19 @@ ${tocNav(toc)}
 </div>`;
   return {
     url,
-    kind: slug === 'faq' ? 'faq' : 'guide',
-    active: slug === 'faq' ? 'faq' : 'guide',
-    title: `${data.title || heading} — ${SITE.name}`,
+    kind: data.kind || 'guide',
+    active: section.active,
+    title: pageTitle(data.title || heading),
     heading,
     label,
     description: data.description,
     keywords: data.keywords,
     sources: [source],
-    crumbs: [{name: SITE.name, url: '/'}, {name: label, url}],
+    crumbs,
     markdown: markdownCopy(heading, body, source, pages, url),
-    group: slug === 'faq' ? 'FAQ' : 'Guides',
+    group: section.group,
     faq,
+    steps,
     body: bodyHtml,
   };
 }
@@ -1574,9 +1679,9 @@ ${codeBlock(':root {\n  --auditstatus-tile: #1D3536;\n  --auditstatus-line: #7FB
     url: '/brand/',
     kind: 'brand',
     active: 'brand',
-    title: `Brand — ${SITE.name}`,
+    title: pageTitle('Brand: logo, colors and type'),
     heading: 'Brand',
-    description: 'The Audit Status logo, mark, colors and type: SVG downloads, clear space, minimum sizes and how to use them.',
+    description: 'The Audit Status logo, mark, colors and type: SVG downloads, clear space, minimum sizes, and the rules for using each file on light and dark.',
     sources: ['site/brand/logo.svg', 'site/brand/mark.svg'],
     crumbs: [{name: SITE.name, url: '/'}, {name: 'Brand', url: '/brand/'}],
     markdown: null,
@@ -1588,7 +1693,7 @@ function notFound() {
   return {
     url: '/404.html',
     kind: 'error',
-    title: `Page not found — ${SITE.name}`,
+    title: pageTitle('Page not found'),
     description: 'Nothing is published at this address. The documentation, the guides and the language pages are linked from the home page.',
     sources: [],
     markdown: null,
@@ -1621,8 +1726,68 @@ function lastmod(sources, fallback) {
   return dates.length > 0 ? dates.at(-1) : fallback;
 }
 
+// Search engines and AI agents that read this file by name. Each may read
+// everything, like every other crawler.
+const CRAWLERS = [
+  'Googlebot',
+  'Bingbot',
+  'DuckDuckBot',
+  'DuckAssistBot',
+  'Applebot',
+  'Applebot-Extended',
+  'Google-Extended',
+  'GPTBot',
+  'OAI-SearchBot',
+  'ChatGPT-User',
+  'ClaudeBot',
+  'Claude-User',
+  'Claude-SearchBot',
+  'PerplexityBot',
+  'Perplexity-User',
+  'CCBot',
+  'meta-externalagent',
+];
+
+// When a page's oldest source was added to the repository, from git. Pages
+// whose sources are not committed yet take the build time, like lastmod.
+const firstAdded = new Map();
+function published(sources, fallback) {
+  const dates = sources.map(source => {
+    if (!firstAdded.has(source)) {
+      let date = '';
+      try {
+        date = execFileSync('git', ['-C', root, 'log', '--diff-filter=A', '--format=%cI', '--', source], {encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore']}).trim().split('\n').at(-1);
+      } catch {}
+
+      firstAdded.set(source, date);
+    }
+
+    return firstAdded.get(source);
+  }).filter(Boolean).sort();
+  return dates.length > 0 ? dates[0] : fallback;
+}
+
 function robots() {
-  return `# Everything on this site is public. Search engines, crawlers and AI agents are welcome;\n# ${SITE.url}/llms.txt lists the pages for language models.\nUser-agent: *\nAllow: /\n\nSitemap: ${SITE.url}/sitemap.xml\n`;
+  const named = CRAWLERS.map(agent => `User-agent: ${agent}\nAllow: /\n`).join('\n');
+  return `# Everything on this site is public. Search engines, crawlers and AI agents are welcome;\n# ${SITE.url}/llms.txt lists the pages for language models.\nUser-agent: *\nAllow: /\n\n${named}\nSitemap: ${SITE.url}/sitemap.xml\n`;
+}
+
+// RFC 9116. Reports go to Forward Email's security contact, as the README
+// says, with the key and policy Forward Email publishes in its own
+// security.txt. The file expires a year after the build; every deploy
+// renews it.
+function securityTxt(buildTime) {
+  const expires = new Date(Date.parse(buildTime) + (365 * 24 * 60 * 60 * 1000)).toISOString().replace(/\.\d+Z$/, 'Z');
+  return [
+    'Contact: mailto:security@forwardemail.net',
+    `Contact: ${SITE.security}`,
+    `Expires: ${expires}`,
+    'Encryption: https://forwardemail.net/.well-known/openpgpkey/hu/mxqp8ogw4jfq83a58pn1wy1ccc1cx3f5.asc',
+    'Preferred-Languages: en',
+    `Canonical: ${SITE.url}/.well-known/security.txt`,
+    'Policy: https://github.com/forwardemail/.github/blob/main/SECURITY.md',
+    '',
+  ].join('\n');
 }
 
 function sitemap(pages) {
@@ -1639,6 +1804,14 @@ function llms(pages) {
 
 Audit Status is one binary with two roles: an attester on each server, invoked by the verifier over SSH with a forced command (or through kubectl port-forward), and a verifier that runs in CI, compares the evidence with references it fetches itself, and writes report.md, report.json and a badge. It is built on Attestium. Each link below is the Markdown source of a page.
 
+## Overview
+
+${group('Overview')}
+
+## Install
+
+${group('Install')}
+
 ## Documentation
 
 ${group('Documentation')}
@@ -1651,6 +1824,10 @@ ${group('Languages')}
 
 ${group('Guides')}
 ${group('FAQ')}
+
+## Project
+
+${group('Project')}
 
 ## Schemas
 
@@ -1722,6 +1899,12 @@ async function build({outDir = path.join(root, '_site')} = {}) {
     copy(path.join(siteDir, file), outDir, file);
   }
 
+  for (const dir of ['fonts', 'img']) {
+    for (const file of fs.readdirSync(path.join(siteDir, dir))) {
+      copy(path.join(siteDir, dir, file), outDir, `${dir}/${file}`);
+    }
+  }
+
   for (const file of fs.readdirSync(path.join(siteDir, 'brand')).filter(name => name.endsWith('.svg'))) {
     copy(path.join(siteDir, 'brand', file), outDir, `brand/${file}`);
   }
@@ -1739,16 +1922,35 @@ async function build({outDir = path.join(root, '_site')} = {}) {
   const order = nav.flatMap(g => g.pages);
   const sources = new Set(['README.md', ...order.map(p => p.source)]);
 
-  const guideSummaries = GUIDES.map(slug => {
+  const summaries = slugs => slugs.map(slug => {
     const {data} = frontMatter(fs.readFileSync(path.join(siteDir, 'pages', `${slug}.md`), 'utf8'));
     return {url: `/${slug}/`, label: data.label, description: data.description};
   });
+  const guideSummaries = summaries(GUIDES);
+  const installSummaries = summaries(INSTALL);
+  const projectSummaries = summaries(PROJECT);
+  const sections = {
+    guides: {
+      title: 'More guides', group: 'Guides', active: 'guide', items: guideSummaries,
+    },
+    faq: {
+      title: 'Guides', group: 'FAQ', active: 'faq', items: guideSummaries,
+    },
+    install: {
+      title: 'Install methods', group: 'Install', active: 'install', hub: installSummaries[0], items: installSummaries,
+    },
+    project: {
+      title: 'About the project', group: 'Project', active: 'project', items: projectSummaries,
+    },
+  };
   const rows = languageRows();
   const pages = [
     landing(sources),
     ...order.map(doc => docPage(doc, nav, order, sources)),
-    ...GUIDES.map(slug => guidePage(slug, sources, guideSummaries)),
-    guidePage('faq', sources, guideSummaries),
+    ...INSTALL.map(slug => guidePage(slug, sources, sections.install)),
+    ...GUIDES.map(slug => guidePage(slug, sources, sections.guides)),
+    guidePage('faq', sources, sections.faq),
+    ...PROJECT.map(slug => guidePage(slug, sources, sections.project)),
     ...[...rows.keys()].filter(slug => fs.existsSync(path.join(root, `docs/languages/${slug}.md`))).map(slug => languagePage(slug, rows, nav, sources)),
     schemaPage(),
     projectsPage(),
@@ -1756,9 +1958,14 @@ async function build({outDir = path.join(root, '_site')} = {}) {
     notFound(),
   ];
 
-  const context = {assets, guides: guideSummaries};
+  const context = {assets, guides: guideSummaries, installs: installSummaries.slice(1)};
   for (const p of pages) {
     p.lastmod = lastmod(p.sources, buildTime);
+    p.published = published(p.sources, p.lastmod);
+    if (p.published > p.lastmod) {
+      p.published = p.lastmod;
+    }
+
     write(outDir, p.url, render(p, context));
     if (p.markdown) {
       write(outDir, `${p.url}index.md`, p.markdown);
@@ -1775,6 +1982,7 @@ async function build({outDir = path.join(root, '_site')} = {}) {
 
   fs.writeFileSync(path.join(outDir, 'sitemap.xml'), sitemap(pages));
   fs.writeFileSync(path.join(outDir, 'robots.txt'), robots());
+  write(outDir, '/.well-known/security.txt', securityTxt(buildTime));
   fs.writeFileSync(path.join(outDir, 'llms.txt'), llms(pages));
   fs.writeFileSync(path.join(outDir, 'llms-full.txt'), llmsFull(pages));
   fs.writeFileSync(path.join(outDir, 'manifest.webmanifest'), manifest());

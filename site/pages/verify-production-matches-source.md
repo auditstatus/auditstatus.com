@@ -1,5 +1,5 @@
 <!--
-title: Verify that production matches the source code
+title: Verify production matches the source code
 description: Check that production servers run exactly the commit in a public repository: deployed files, packages, processes and every running executable.
 label: Production matches source
 keywords: verify production code, deployed code matches repository, production drift, git commit verification, lockfile verification

@@ -1,5 +1,5 @@
 <!--
-title: Runtime integrity monitoring for Linux servers
+title: Runtime integrity monitoring for Linux
 description: Detect injected libraries, debuggers, modified binaries and programs that ran between audits, with process checks, an eBPF monitor and IMA.
 label: Runtime integrity monitoring
 keywords: runtime integrity monitoring, process injection detection, LD_PRELOAD, eBPF monitor, IMA, file integrity, Linux servers
