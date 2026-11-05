@@ -27,7 +27,7 @@ AUDITSTATUS_VERSION=<version> bash install.sh
 
 | Variable              | Default            | Meaning                                      |
 | --------------------- | ------------------ | -------------------------------------------- |
-| `AUDITSTATUS_VERSION` | the latest release | The release to install, for example `2.0.0`. |
+| `AUDITSTATUS_VERSION` | the latest release | The release to install, for example `2.0.1`. |
 | `AUDITSTATUS_BIN_DIR` | `/usr/local/bin`   | Where to install `auditstatus`.              |
 
 Run the release binary on servers, not the npm package. The verifier compares the attester's own executable with the release's `SHA256SUMS` (`policy.unverifiedAuditor`, `fail` by default), and an npm installation runs a Node.js binary that is not in that list.
@@ -154,7 +154,7 @@ ansible-playbook -i inventory ansible/attester.yml
 
 | Variable                    | Default                        | Meaning                                                                                     |
 | --------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------- |
-| `auditstatus_version`       | `2.0.0`                        | The release to install.                                                                     |
+| `auditstatus_version`       | `2.0.1`                        | The release to install.                                                                     |
 | `auditstatus_sha256`        | (required)                     | The SHA-256 of the binary for this machine's architecture, from the release's `SHA256SUMS`. |
 | `auditstatus_arch`          | `arm64` on aarch64, else `x64` | The binary's architecture.                                                                  |
 | `auditstatus_url`           | the release download URL       | Where to download the binary.                                                               |

@@ -5,7 +5,7 @@
 #   curl -fsSL https://github.com/auditstatus/auditstatus.com/releases/latest/download/install.sh | bash
 #
 # Environment:
-#   AUDITSTATUS_VERSION   release to install, e.g. 2.0.0 (default: latest)
+#   AUDITSTATUS_VERSION   release to install, e.g. 2.0.1 (default: latest)
 #   AUDITSTATUS_BIN_DIR   install directory (default: /usr/local/bin)
 #
 # The binary is checked against the release's SHA256SUMS before it is

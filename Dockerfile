@@ -2,7 +2,7 @@
 # charts/auditstatus-attester).  Built by the release workflow from the
 # release's single executables:
 #
-#   docker buildx build --platform linux/amd64,linux/arm64 --build-arg VERSION=2.0.0 .
+#   docker buildx build --platform linux/amd64,linux/arm64 --build-arg VERSION=2.0.1 .
 #
 # The image holds the attester, crictl (to identify containers through the
 # CRI) and tpm2-tools.  It runs `auditstatus serve` on the pod's loopback

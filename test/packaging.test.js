@@ -11,7 +11,7 @@ const path = require('node:path');
 const {spawnSync} = require('node:child_process');
 const yaml = require('js-yaml');
 const {distro} = require('attestium');
-const {tempDir} = require('./helpers');
+const {tempDir, git: gitAt} = require('./helpers');
 const {normalizeAttesterConfig, normalizeVerifierConfig, ConfigError} = require('../lib/config');
 const {workflow} = require('../lib/init');
 
@@ -123,20 +123,87 @@ test('the Helm chart and the image agree', () => {
   assert.match(values.image.repository, /\/attester$/);
 });
 
-test('the chart, the Ansible role, the action and the install guides name the version package.json releases', () => {
-  const {version} = require('../package.json');
-  const major = version.split('.')[0];
-  const chart = yaml.load(fs.readFileSync(path.join(CHART, 'Chart.yaml'), 'utf8'));
+/**
+ * The files under root that name a release all name this version.
+ */
+function assertNamesVersion(root, version) {
+  const chart = path.join(root, 'charts', 'auditstatus-attester');
+  const {appVersion, version: chartVersion} = yaml.load(fs.readFileSync(path.join(chart, 'Chart.yaml'), 'utf8'));
   // The release workflow publishes v<package.json version>; the attester
   // reports that version, and the verifier fetches its checksums by it.
-  assert.equal(chart.appVersion, version);
-  assert.equal(chart.version, version);
-  const defaults = yaml.load(fs.readFileSync(path.join(ROOT, 'ansible', 'roles', 'auditstatus_attester', 'defaults', 'main.yml'), 'utf8'));
+  assert.equal(appVersion, version);
+  assert.equal(chartVersion, version);
+  assert.equal(yaml.load(fs.readFileSync(path.join(chart, 'values.yaml'), 'utf8')).image.tag, `v${version}`);
+  const defaults = yaml.load(fs.readFileSync(path.join(root, 'ansible', 'roles', 'auditstatus_attester', 'defaults', 'main.yml'), 'utf8'));
   assert.equal(defaults.auditstatus_version, version);
-  assert.match(workflow(), new RegExp(`auditstatus/auditstatus.com@v${major}\\n`));
-  assert.match(fs.readFileSync(path.join(ROOT, 'docs', 'attester.md'), 'utf8'), new RegExp(`for example \`${version.replaceAll('.', String.raw`\.`)}\``));
-  const example = JSON.parse(fs.readFileSync(path.join(ROOT, 'site', 'schema', 'report.example.json'), 'utf8'));
+  const escaped = version.replaceAll('.', String.raw`\.`);
+  const guide = fs.readFileSync(path.join(root, 'docs', 'attester.md'), 'utf8');
+  assert.match(guide, new RegExp(`for example \`${escaped}\``));
+  assert.match(guide, new RegExp(`\\| \`auditstatus_version\` +\\| \`${escaped}\` +\\|`));
+  assert.match(fs.readFileSync(path.join(root, 'docs', 'kubernetes.md'), 'utf8'), new RegExp(`\\| \`image\\.tag\` +\\| \`v${escaped}\` +\\|`));
+  const exampleText = fs.readFileSync(path.join(root, 'site', 'schema', 'report.example.json'), 'utf8');
+  const example = JSON.parse(exampleText);
   assert.equal(example.verifier.version, version);
+  assert.equal(example.servers[0].attesterVersion, version);
+  assert.match(exampleText, new RegExp(`matches the published release ${escaped}"`));
+  assert.match(fs.readFileSync(path.join(root, 'Dockerfile'), 'utf8'), new RegExp(`--build-arg VERSION=${escaped} `));
+  assert.match(fs.readFileSync(path.join(root, 'scripts', 'install.sh'), 'utf8'), new RegExp(`release to install, e\\.g\\. ${escaped} `));
+}
+
+test('the chart, the Ansible role, the action and the install guides name the version package.json releases', () => {
+  const {version} = require('../package.json');
+  assertNamesVersion(ROOT, version);
+  assert.match(workflow(), new RegExp(`auditstatus/auditstatus.com@v${version.split('.')[0]}\\n`));
+});
+
+test('npm version writes the new version into each of them and adds them to its commit', t => {
+  const temp = tempDir(t);
+  const files = [
+    'charts/auditstatus-attester/Chart.yaml',
+    'charts/auditstatus-attester/values.yaml',
+    'ansible/roles/auditstatus_attester/defaults/main.yml',
+    'docs/attester.md',
+    'docs/kubernetes.md',
+    'site/schema/report.example.json',
+    'Dockerfile',
+    'scripts/install.sh',
+  ];
+  for (const file of files) {
+    fs.mkdirSync(path.dirname(path.join(temp, file)), {recursive: true});
+    fs.copyFileSync(path.join(ROOT, file), path.join(temp, file));
+  }
+
+  // The repository at its release, then package.json bumped as npm version
+  // does: a longer version, so table cells grow.
+  const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+  fs.writeFileSync(path.join(temp, 'package.json'), JSON.stringify(manifest, null, 2));
+  fs.symlinkSync(path.join(ROOT, 'node_modules'), path.join(temp, 'node_modules'));
+  fs.writeFileSync(path.join(temp, '.gitignore'), 'node_modules\n');
+  gitAt(temp, 'init', '-q');
+  gitAt(temp, 'add', '-A');
+  gitAt(temp, 'commit', '-q', '-m', 'release');
+  fs.writeFileSync(path.join(temp, 'package.json'), JSON.stringify({...manifest, version: '12.34.5-rc.1'}, null, 2));
+
+  const result = spawnSync(process.execPath, [path.join(ROOT, 'scripts', 'sync-version.js'), '--stage'], {cwd: temp, encoding: 'utf8'});
+  assert.equal(result.status, 0, result.stderr);
+  assertNamesVersion(temp, '12.34.5-rc.1');
+  assert.deepEqual(gitAt(temp, 'diff', '--cached', '--name-only').split('\n').sort(), [...files].sort());
+  // The tables stay as the repository's lint writes them.
+  for (const file of ['docs/attester.md', 'docs/kubernetes.md']) {
+    const formatted = spawnSync(path.join(ROOT, 'node_modules', '.bin', 'remark'), [file, '--quiet'], {cwd: temp, encoding: 'utf8'});
+    assert.equal(formatted.stdout, fs.readFileSync(path.join(temp, file), 'utf8'), file);
+  }
+
+  // A file that no longer names the version where the script looks fails the
+  // next bump, before any file changes.
+  gitAt(temp, 'commit', '-q', '-a', '-m', '12.34.5-rc.1');
+  fs.writeFileSync(path.join(temp, 'Dockerfile'), 'FROM scratch\n');
+  fs.writeFileSync(path.join(temp, 'package.json'), JSON.stringify({...manifest, version: '12.34.5'}, null, 2));
+  const broken = spawnSync(process.execPath, [path.join(ROOT, 'scripts', 'sync-version.js'), '--stage'], {cwd: temp, encoding: 'utf8'});
+  assert.notEqual(broken.status, 0);
+  assert.match(broken.stderr, /Dockerfile no longer names the version/);
+  assert.equal(gitAt(temp, 'diff', '--name-only'), 'Dockerfile\npackage.json');
+  assert.equal(gitAt(temp, 'diff', '--cached', '--name-only'), '');
 });
 
 test('the Ansible role passes a syntax check', {skip: !ansible && 'ansible-playbook is not installed'}, t => {
@@ -474,7 +541,7 @@ test('the attester pod is confined, and chart values cannot add to its spec', {s
   // The image by digest; the port a number.
   const digest = `sha256:${'a'.repeat(64)}`;
   const pinned = render({...services, image: {digest}}).objects.find(object => object.kind === 'DaemonSet');
-  assert.equal(pinned.spec.template.spec.containers[0].image, `ghcr.io/auditstatus/attester:v2.0.0@${digest}`);
+  assert.equal(pinned.spec.template.spec.containers[0].image, `ghcr.io/auditstatus/attester:v${require('../package.json').version}@${digest}`);
   assert.match(render({...services, image: {digest: 'latest'}}).output, /image\.digest/);
   assert.match(render({...services, port: '8740", "--listen", "0.0.0.0:8740'}).output, /port must be/);
   assert.notEqual(render({...services, port: 70_000}).status, 0);

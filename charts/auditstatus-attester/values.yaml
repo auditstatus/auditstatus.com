@@ -4,7 +4,7 @@
 
 image:
   repository: ghcr.io/auditstatus/attester
-  tag: "v2.0.0"
+  tag: "v2.0.1"
   # Pin by digest in production (sha256:..., from the release): the image
   # is then pulled as tag@digest, and a moved tag cannot change it.
   digest: ""

@@ -122,7 +122,8 @@
     "prepare": "husky",
     "pretest": "pnpm run lint",
     "test": "node --test test/*.test.js",
-    "test-coverage": "c8 node --test test/*.test.js"
+    "test-coverage": "c8 node --test test/*.test.js",
+    "version": "node scripts/sync-version.js --stage"
   },
   "xo": {
     "rules": {
