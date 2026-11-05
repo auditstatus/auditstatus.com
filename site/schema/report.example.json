@@ -3,7 +3,7 @@
   "version": 2,
   "generatedAt": "2026-01-01T12:00:00.000Z",
   "verifier": {
-    "version": "2.0.1"
+    "version": "2.0.2"
   },
   "services": [
     {
@@ -29,7 +29,7 @@
         {
           "severity": "info",
           "check": "attester",
-          "message": "Attester binary matches the published release 2.0.1"
+          "message": "Attester binary matches the published release 2.0.2"
         },
         {
           "severity": "fail",
@@ -164,7 +164,7 @@
         }
       ],
       "collectedAt": "2026-01-01T12:00:00.000Z",
-      "attesterVersion": "2.0.1",
+      "attesterVersion": "2.0.2",
       "os": {
         "id": "ubuntu",
         "versionId": "24.04",

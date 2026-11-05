@@ -1,7 +1,7 @@
 ---
 # Release to install, and the SHA-256 of its binary for this machine's
 # architecture (from the release's SHA256SUMS).
-auditstatus_version: "2.0.1"
+auditstatus_version: "2.0.2"
 auditstatus_sha256: ""
 auditstatus_arch: "{{ 'arm64' if ansible_architecture in ['aarch64', 'arm64'] else 'x64' }}"
 auditstatus_url: "https://github.com/auditstatus/auditstatus.com/releases/download/v{{ auditstatus_version }}/auditstatus-linux-{{ auditstatus_arch }}"
