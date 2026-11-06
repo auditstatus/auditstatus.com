@@ -268,7 +268,7 @@ jobs:
       # The commits the servers ran at the first attempt.
       - name: Download the first attempt's report
         if: inputs.build
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: report-${{ inputs.project }}
           path: ${{ runner.temp }}/first
@@ -327,7 +327,7 @@ jobs:
           restore-keys: registry/${{ inputs.project }}/builds/
 
       - name: Download the first attempt's report
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: report-${{ inputs.project }}
           path: ${{ runner.temp }}/first
